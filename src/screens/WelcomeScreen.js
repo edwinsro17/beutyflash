@@ -78,7 +78,7 @@ export default function WelcomeScreen({ navigation }) {
           <CustomButton 
             title="Registrarse" 
             variant="secondary" 
-            onPress={() => alert('Registrarse')} 
+            onPress={() => navigation.replace('AccountSelection')} 
           />
         </View>
 

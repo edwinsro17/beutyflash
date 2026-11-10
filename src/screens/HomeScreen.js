@@ -20,7 +20,7 @@ import CategoryItem from '../components/CategoryItem';
 import ProfessionalCard from '../components/ProfessionalCard';
 import BottomMenu from '../components/BottomMenu';
 
-export default function HomeScreen() {
+export default function HomeScreen({ navigation }) {
   // Coordenadas iniciales (Madrid por defecto mientras carga tu GPS real)
   const [coords, setCoords] = useState({
     latitude: 40.4168,
@@ -207,15 +207,47 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* 5. Categorías */}
+{/* 5. Categorías */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Categorías</Text>
+          <TouchableOpacity 
+            style={styles.seeAllBtn} 
+            onPress={() => navigation?.navigate('AllCategories')}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.seeAllText}>Ver todas</Text>
+            <Feather name="arrow-right" size={14} color="#8D5B4C" />
+          </TouchableOpacity>
         </View>
+
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoriesScroll}>
-          <CategoryItem iconName="content-cut" title="Cabello" subtitle="Corte & Color" />
-          <CategoryItem iconName="brush" title="Maquillaje" subtitle="Social & Novias" />
-          <CategoryItem iconName="palette" title="Uñas" subtitle="Manicura Gel" />
-          <CategoryItem iconName="flower-outline" title="Facial" subtitle="Glow & Detox" />
+          <TouchableOpacity 
+            activeOpacity={0.8} 
+            onPress={() => navigation?.navigate('CategoryDetail', { categoryId: 'cabello' })}
+          >
+            <CategoryItem iconName="content-cut" title="Cabello" subtitle="Corte & Color" />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            activeOpacity={0.8} 
+            onPress={() => navigation?.navigate('CategoryDetail', { categoryId: 'maquillaje' })}
+          >
+            <CategoryItem iconName="brush" title="Maquillaje" subtitle="Social & Novias" />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            activeOpacity={0.8} 
+            onPress={() => navigation?.navigate('CategoryDetail', { categoryId: 'unas' })}
+          >
+            <CategoryItem iconName="palette" title="Uñas" subtitle="Manicura Gel" />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            activeOpacity={0.8} 
+            onPress={() => navigation?.navigate('CategoryDetail', { categoryId: 'facial' })}
+          >
+            <CategoryItem iconName="flower-outline" title="Facial" subtitle="Glow & Detox" />
+          </TouchableOpacity>
         </ScrollView>
 
         {/* 6. Top Rated Flash */}
@@ -309,4 +341,6 @@ const styles = StyleSheet.create({
   sectionSubtitle: { fontSize: 12, color: colors.textGray, marginTop: 2 },
   categoriesScroll: { marginBottom: 24 },
   topRatedScroll: { marginBottom: 10, paddingBottom: 10, paddingRight: 20 },
+  seeAllBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2 },
+  seeAllText: { fontSize: 13, fontWeight: '700', color: '#8D5B4C' },
 });

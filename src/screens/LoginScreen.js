@@ -10,8 +10,7 @@ import {
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import CustomInput from '../components/CustomInput';
-import CustomButton from '../components/CustomButton';
-// Quita el SafeAreaView de la primera importación y ponlo en esta nueva:
+
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function LoginScreen({ navigation }) {
@@ -43,24 +42,20 @@ export default function LoginScreen({ navigation }) {
             Accede a tus citas, rituales personalizados y especialistas selectos.
           </Text>
         </View>
-
-        {/* 3. Pestañas (Tabs) Correo / Teléfono */}
+        
+        {/* 3. Tabs para elegir método de inicio */}
         <View style={styles.tabContainer}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.tab, metodo === 'correo' && styles.tabActive]}
             onPress={() => setMetodo('correo')}
           >
-            <Text style={[styles.tabText, metodo === 'correo' && styles.tabTextActive]}>
-              Correo electrónico
-            </Text>
+            <Text style={[styles.tabText, metodo === 'correo' && styles.tabTextActive]}>Correo Electrónico</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.tab, metodo === 'telefono' && styles.tabActive]}
             onPress={() => setMetodo('telefono')}
           >
-            <Text style={[styles.tabText, metodo === 'telefono' && styles.tabTextActive]}>
-              Teléfono Móvil
-            </Text>
+            <Text style={[styles.tabText, metodo === 'telefono' && styles.tabTextActive]}>Teléfono</Text>
           </TouchableOpacity>
         </View>
 
@@ -101,9 +96,9 @@ export default function LoginScreen({ navigation }) {
         {/* 6. Botón Principal */}
         <TouchableOpacity style={styles.mainButton} onPress={() => navigation.replace('Home')}>
           <Text style={styles.mainButtonText}>Iniciar Sesión</Text>
-          <Feather name="arrow-right" size={18} color={colors.surface} style={{ marginLeft: 8 }} />
+          <Feather name="arrow-right" size={16} color={colors.surface} style={{ marginLeft: 8 }} />
         </TouchableOpacity>
-
+        
         {/* 7. Separador Social */}
         <View style={styles.dividerContainer}>
           <View style={styles.line} />
@@ -126,7 +121,7 @@ export default function LoginScreen({ navigation }) {
         {/* 9. Footer (Registro y Legal) */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            ¿No tienes cuenta? <Text style={styles.footerHighlight}>Regístrate</Text>
+            ¿No tienes cuenta? <Text style={styles.footerHighlight} onPress={() => navigation.navigate('AccountSelection')}>Regístrate</Text>
           </Text>
           <View style={styles.legalRow}>
             <Feather name="lock" size={10} color={colors.textGray} />

@@ -37,11 +37,7 @@ export default function SplashScreen({ navigation }) {
           { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }
         ]}
       >
-        {/* Píldora Superior */}
-        <View style={styles.topPill}>
-          <Text style={styles.topPillText}>✨ EXPERIENCIA PREMIUM</Text>
-        </View>
-
+        
         {/* Centro: Logo y Textos */}
         <View style={styles.centerBlock}>
           <View style={styles.logoRow}>
