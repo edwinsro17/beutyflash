@@ -1,163 +1,243 @@
+/**
+ * Archivo: src/screens/SplashScreen.js
+ * Splash Screen Luxury Editorial con animación multicapa (Halo pulsante, entrada
+ * tipográfica escalonada y barra de progreso en tonos Terracota/Obsidiana).
+ */
+
 import React, { useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, Animated } from 'react-native';
-import { colors } from '../theme/colors';
-// Quita el SafeAreaView de la primera importación y ponlo en esta nueva:
+import { StyleSheet, Text, View, Animated, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+
 export default function SplashScreen({ navigation }) {
-  // Valores iniciales de la animación (Opacidad 0, Escala 0.9)
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.90)).current;
+  const scaleAnim = useRef(new Animated.Value(0.86)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const slideUpAnim = useRef(new Animated.Value(24)).current;
+  const progressAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Iniciar las animaciones en paralelo
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.14,
+          duration: 1100,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1100,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+
     Animated.parallel([
       Animated.timing(fadeAnim, {
-        toValue: 1, // Llega a opacidad 1 (visible)
-        duration: 1500, // 1.5 segundos
+        toValue: 1,
+        duration: 1100,
         useNativeDriver: true,
       }),
-      Animated.timing(scaleAnim, {
-        toValue: 1, // Llega a escala 1 (tamaño normal)
-        duration: 1500,
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        friction: 6,
+        tension: 45,
         useNativeDriver: true,
       }),
-    ]).start(() => {
-      // Cuando termina la animación, esperamos 1.5 segundos más y cambiamos de pantalla
-      setTimeout(() => {
-        navigation.replace('RoleSelection');
-      }, 1500);
-    });
-  }, [fadeAnim, scaleAnim, navigation]); // <-- ¡Aquí cambiamos onFinish por navigation!
+      Animated.timing(slideUpAnim, {
+        toValue: 0,
+        duration: 1100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(progressAnim, {
+        toValue: 1,
+        duration: 2400,
+        useNativeDriver: false,
+      }),
+    ]).start();
+
+    const timer = setTimeout(() => {
+      navigation.replace('RoleSelection');
+    }, 2600);
+
+    return () => clearTimeout(timer);
+  }, [fadeAnim, scaleAnim, pulseAnim, slideUpAnim, progressAnim, navigation]);
+
+  const progressWidth = progressAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0%', '100%'],
+  });
 
   return (
-    <SafeAreaView style={styles.container}>
-      <Animated.View 
-        style={[
-          styles.content, 
-          { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }
-        ]}
-      >
-        
-        {/* Centro: Logo y Textos */}
-        <View style={styles.centerBlock}>
+    <LinearGradient
+      colors={['#1A1A1A', '#2B1E1A', '#1A1A1A']}
+      style={styles.container}
+    >
+      <StatusBar barStyle="light-content" backgroundColor="#1A1A1A" />
+      <SafeAreaView style={styles.safe}>
+        {/* Píldora Luxury Superior */}
+        <Animated.View style={[styles.topBadge, { opacity: fadeAnim }]}>
+          <MaterialCommunityIcons name="star-four-points" size={12} color="#D48C70" />
+          <Text style={styles.topBadgeText}>ATELIER DIGITAL • COLOMBIA</Text>
+          <MaterialCommunityIcons name="star-four-points" size={12} color="#D48C70" />
+        </Animated.View>
+
+        {/* Bloque Central con Halo Pulsante */}
+        <Animated.View
+          style={[
+            styles.centerBlock,
+            {
+              opacity: fadeAnim,
+              transform: [{ scale: scaleAnim }, { translateY: slideUpAnim }],
+            },
+          ]}
+        >
+          <View style={styles.emblemWrapper}>
+            <Animated.View
+              style={[
+                styles.haloOuter,
+                { transform: [{ scale: pulseAnim }] },
+              ]}
+            />
+            <LinearGradient
+              colors={['#D48C70', '#844D3B']}
+              style={styles.emblemCircle}
+            >
+              <MaterialCommunityIcons name="flower-tulip-outline" size={38} color="#FFFFFF" />
+            </LinearGradient>
+          </View>
+
           <View style={styles.logoRow}>
-            {/* Simulando una fuente elegante (Itálica + Bold) */}
             <Text style={styles.logoBeauty}>Beauty</Text>
             <Text style={styles.logoFlash}>Flash</Text>
           </View>
-          
+
           <Text style={styles.subtitle}>
-            BELLEZA Y ALTA PELUQUERÍA A DOMICILIO
+            ALTA PELUQUERÍA & ESTÉTICA A DOMICILIO Y EN SALÓN
           </Text>
 
-          <View style={styles.divider} />
+          <View style={styles.goldLine} />
 
-          <Text style={styles.welcomeText}>
-            Bienvenida a tu santuario de belleza.
+          <Text style={styles.welcomeQuote}>
+            “La excelencia del salón de lujo, donde tú estés.”
           </Text>
-        </View>
+        </Animated.View>
 
-        {/* Footer: Nueva frase */}
+        {/* Barra de Progreso Minimalista Inferior */}
         <View style={styles.footer}>
-          <View style={styles.footerDivider} />
-          <Text style={styles.footerText}>EL LUJO DE CUIDAR DE TI</Text>
+          <View style={styles.progressTrack}>
+            <Animated.View style={[styles.progressFill, { width: progressWidth }]} />
+          </View>
+          <Text style={styles.footerText}>EXPERIENCIA DE LUJO VERIFICADA</Text>
         </View>
-
-      </Animated.View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  container: { flex: 1 },
+  safe: {
     flex: 1,
-    backgroundColor: '#FAF5F2', // Un tono crema un poco más cálido para el splash
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  content: {
-    flex: 1,
-    width: '100%',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 60,
+    paddingVertical: 46,
+    paddingHorizontal: 26,
   },
-  
-  // Píldora Superior
-  topPill: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 2,
-  },
-  topPillText: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 2,
-    color: '#8D5B4C',
-  },
-
-  // Centro
-  centerBlock: {
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  logoRow: {
+  topBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    gap: 8,
+    backgroundColor: 'rgba(212, 140, 112, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(212, 140, 112, 0.35)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
   },
+  topBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 2.2,
+    color: '#F8F6F4',
+  },
+  centerBlock: { alignItems: 'center' },
+  emblemWrapper: {
+    width: 110,
+    height: 110,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 22,
+  },
+  haloOuter: {
+    position: 'absolute',
+    width: 108,
+    height: 108,
+    borderRadius: 54,
+    backgroundColor: 'rgba(212, 140, 112, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(212, 140, 112, 0.42)',
+  },
+  emblemCircle: {
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 10,
+  },
+  logoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   logoBeauty: {
-    fontSize: 48,
-    fontStyle: 'italic', // Le da el toque elegante/serif clásico
+    fontSize: 46,
+    fontStyle: 'italic',
     fontWeight: '300',
-    color: '#2D221E',
+    color: '#F8F6F4',
   },
   logoFlash: {
-    fontSize: 48,
-    fontWeight: '800', // Contraste moderno
-    color: '#8D5B4C',
+    fontSize: 46,
+    fontWeight: '900',
+    color: '#D48C70',
   },
   subtitle: {
-    fontSize: 11,
+    fontSize: 10.5,
     letterSpacing: 2,
-    fontWeight: '600',
-    color: '#66615E',
+    fontWeight: '700',
+    color: '#D6CEC7',
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 18,
   },
-  divider: {
-    width: 60,
-    height: 1,
-    backgroundColor: '#8D5B4C',
-    opacity: 0.3,
-    marginBottom: 20,
+  goldLine: {
+    width: 64,
+    height: 1.5,
+    backgroundColor: '#D48C70',
+    opacity: 0.65,
+    marginBottom: 16,
   },
-  welcomeText: {
-    fontSize: 14,
-    color: '#8D5B4C',
+  welcomeQuote: {
+    fontSize: 13.5,
+    color: '#E5DCD4',
     fontStyle: 'italic',
+    textAlign: 'center',
   },
-
-  // Footer
-  footer: {
-    alignItems: 'center',
-    paddingBottom: 20,
+  footer: { width: '100%', alignItems: 'center' },
+  progressTrack: {
+    width: 190,
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginBottom: 12,
   },
-  footerDivider: {
-    width: 30,
-    height: 1,
-    backgroundColor: '#ccc',
-    marginBottom: 10,
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#D48C70',
+    borderRadius: 2,
   },
   footerText: {
-    fontSize: 10,
-    letterSpacing: 3,
-    fontWeight: '600',
-    color: '#888',
+    fontSize: 9.5,
+    letterSpacing: 2.8,
+    fontWeight: '700',
+    color: '#A99E96',
   },
 });

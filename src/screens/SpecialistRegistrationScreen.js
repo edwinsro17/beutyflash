@@ -1,193 +1,577 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, StatusBar } from 'react-native';
+/**
+ * Archivo: src/screens/SpecialistRegistrationScreen.js
+ * Registro de Profesional con selección de fotografía desde el dispositivo (expo-image-picker)
+ * y subida a Supabase Storage, sin campos para pegar URL.
+ */
+
+import React, { useState, useEffect } from 'react';
+import {
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
+  ScrollView,
+  TextInput,
+  StatusBar,
+  Image,
+  ActivityIndicator,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
+import {
+  colors,
+  sessionStore,
+  callBackendApi,
+  BARRIOS_DISPONIBLES,
+  BLOQUES_HORARIOS_ESTANDAR,
+  seleccionarYSubirFotografiaDispositivo,
+  obtenerUbicacionExactaGPS,
+  useResponsiveLayout,
+} from '../theme/colors';
 
-const colors = { background: '#FAFAFA', surface: '#FFFFFF', primary: '#8B503E', textDark: '#1E1E1E', textGray: '#707070', border: '#EAEAEA', inputBg: '#F5F5F5' };
-
-export default function ProfessionalRegistrationScreen({ navigation }) {
+export default function SpecialistRegistrationScreen({ navigation }) {
+  const layout = useResponsiveLayout();
+  const [nombre, setNombre] = useState('');
+  const [correo, setCorreo] = useState('');
+  const [telefono, setTelefono] = useState('');
+  const [password, setPassword] = useState('');
   const [verClave, setVerClave] = useState(false);
-  const [tipoProfesional, setTipoProfesional] = useState('autonomo');
+  const [barrio, setBarrio] = useState(BARRIOS_DISPONIBLES[0]);
+  const [especialidadPrincipal, setEspecialidadPrincipal] = useState('Peluquería • Color');
   const [experiencia, setExperiencia] = useState('3a5');
-  const [modalidad, setModalidad] = useState('hibrido');
-  const [terminosAceptados, setTerminosAceptados] = useState(false);
+  const [modalidad, setModalidad] = useState('ambos');
+
+  const [fotoUrl, setFotoUrl] = useState(null);
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
+  const [progresoFoto, setProgresoFoto] = useState(0);
+
+  const [nombreEstablecimiento, setNombreEstablecimiento] = useState('');
+  const [direccionEstablecimiento, setDireccionEstablecimiento] = useState('');
+  const [diasAtencion, setDiasAtencion] = useState('Lunes a Sábado');
+  const [horaApertura, setHoraApertura] = useState('08:00 a.m.');
+  const [horaCierre, setHoraCierre] = useState('07:00 p.m.');
+  const [bloquesSeleccionados, setBloquesSeleccionados] = useState([...BLOQUES_HORARIOS_ESTANDAR]);
+
+  const [terminosAceptados, setTerminosAceptados] = useState(true);
+  const [cargando, setCargando] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const tieneEstablecimiento = modalidad === 'local' || modalidad === 'ambos';
+
+  useEffect(() => {
+    obtenerUbicacionExactaGPS('profesional').then((gps) => {
+      if (gps?.direccion && !direccionEstablecimiento) {
+        setDireccionEstablecimiento(gps.direccion);
+      }
+      if (gps?.barrio) setBarrio(gps.barrio);
+    });
+  }, []);
+
+  const handleSeleccionarFotoDispositivo = async () => {
+    setErrorMsg('');
+    setSubiendoFoto(true);
+    setProgresoFoto(10);
+    try {
+      const res = await seleccionarYSubirFotografiaDispositivo({
+        carpeta: 'profesionales',
+        onProgress: (p) => setProgresoFoto(p),
+      });
+      if (res && res.urlPublica) {
+        setFotoUrl(res.urlPublica);
+      }
+    } catch (err) {
+      setErrorMsg(err.message || 'No se pudo cargar la fotografía desde el dispositivo.');
+    } finally {
+      setSubiendoFoto(false);
+    }
+  };
+
+  const toggleBloqueHorario = (h) => {
+    if (bloquesSeleccionados.includes(h)) {
+      if (bloquesSeleccionados.length > 1) {
+        setBloquesSeleccionados(bloquesSeleccionados.filter((item) => item !== h));
+      }
+    } else {
+      setBloquesSeleccionados([...bloquesSeleccionados, h]);
+    }
+  };
+
+  const handleRegistrarProfesional = async () => {
+    if (!nombre.trim() || !correo.trim() || !telefono.trim() || !password.trim()) {
+      setErrorMsg('Completa tu nombre completo, correo profesional, celular y contraseña.');
+      return;
+    }
+    if (!fotoUrl) {
+      setErrorMsg('Selecciona una fotografía de perfil desde tu dispositivo.');
+      return;
+    }
+    if (password.trim().length < 6) {
+      setErrorMsg('La contraseña debe tener mínimo 6 caracteres.');
+      return;
+    }
+    if (tieneEstablecimiento && !nombreEstablecimiento.trim()) {
+      setErrorMsg('Ingresa el nombre de tu establecimiento o salón.');
+      return;
+    }
+
+    setCargando(true);
+    setErrorMsg('');
+
+    const telefonoFormateado = telefono.trim().startsWith('+')
+      ? telefono.trim()
+      : `+57${telefono.trim().replace(/\s+/g, '')}`;
+
+    try {
+      const resp = await callBackendApi('/auth/register/professional', 'POST', {
+        nombre_completo: nombre.trim(),
+        nombre_artistico: nombre.trim(),
+        correo: correo.trim().toLowerCase(),
+        password: password.trim(),
+        telefono: telefonoFormateado,
+        foto_perfil_url: fotoUrl,
+        barrio,
+        tiene_establecimiento: tieneEstablecimiento,
+        nombre_establecimiento: nombreEstablecimiento.trim(),
+        direccion_establecimiento: direccionEstablecimiento.trim(),
+        dias_atencion: diasAtencion,
+        horario_apertura: horaApertura,
+        horario_cierre: horaCierre,
+        bloques_horarios: bloquesSeleccionados,
+        especialidades: [especialidadPrincipal],
+        anios_experiencia: experiencia === '5mas' ? 6 : 3,
+        modalidad,
+      });
+
+      sessionStore.selectedRole = 'profesional';
+      sessionStore.isAuthenticated = true;
+      sessionStore.activeRoleSession = 'profesional';
+      sessionStore.token = resp?.token || `token-pro-${Date.now()}`;
+      sessionStore.proUser = {
+        ...sessionStore.proUser,
+        id: resp?.usuario?.perfil_profesional?.id || resp?.usuario?.id || null,
+        usuario_id: resp?.usuario?.id || null,
+        nombre_completo: nombre.trim(),
+        nombre_artistico: nombre.trim(),
+        correo: correo.trim().toLowerCase(),
+        telefono: telefonoFormateado,
+        foto_perfil_url: fotoUrl,
+        barrio,
+        especialidades: [especialidadPrincipal],
+        modalidad,
+        tiene_establecimiento: tieneEstablecimiento,
+        nombre_establecimiento: nombreEstablecimiento.trim(),
+        direccion_base: direccionEstablecimiento.trim(),
+        horario_atencion: {
+          dias: diasAtencion,
+          apertura: horaApertura,
+          cierre: horaCierre,
+          bloques_disponibles: bloquesSeleccionados,
+        },
+        estado_verificacion: 'aprobado',
+      };
+
+      navigation.reset({ index: 0, routes: [{ name: 'ProDashboard' }] });
+    } catch (err) {
+      setErrorMsg(err.message || 'No se pudo registrar la cuenta profesional.');
+    } finally {
+      setCargando(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-        
-        {/* Header */}
+      <ScrollView
+        contentContainerStyle={[styles.scrollContainer, layout.contentContainerStyle]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Feather name="chevron-left" size={24} color={colors.textDark} />
+            <Feather name="chevron-left" size={22} color={colors.textDark} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Registro De Cuenta</Text>
+          <Text style={styles.headerTitle}>Registro Profesional</Text>
           <View style={{ width: 40 }} />
         </View>
 
         <Text style={styles.heading}>Crea tu Cuenta Profesional</Text>
-        <Text style={styles.description}>Completa tus datos profesionales para verificar tu perfil y comenzar a recibir citas de clientes exclusivos.</Text>
+        <Text style={styles.description}>
+          Selecciona tu fotografía desde el dispositivo y configura tu ubicación y horario de atención.
+        </Text>
 
-        {/* Progress */}
-        <View style={styles.progressBox}>
-          <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8}}>
-            <Text style={styles.progressText}>Paso 1 de 3: Datos Básicos y Especialidad</Text>
-            <Text style={styles.progressText}>33%</Text>
+        {errorMsg ? (
+          <View style={styles.errorBox}>
+            <Feather name="alert-circle" size={16} color="#C0392B" />
+            <Text style={styles.errorText}>{errorMsg}</Text>
           </View>
-          <View style={styles.progressBarBg}><View style={styles.progressBarFill} /></View>
-          <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 8}}>
-            <Feather name="shield" size={12} color={colors.primary} />
-            <Text style={styles.progressDisclaimer}> Perfil confidencial verificado bajo estándar Atelier</Text>
+        ) : null}
+
+        {/* Fotografía desde el dispositivo */}
+        <View style={styles.photoCard}>
+          {fotoUrl ? (
+            <Image source={{ uri: fotoUrl }} style={styles.avatarImg} />
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <Feather name="image" size={26} color={colors.textGray} />
+            </View>
+          )}
+          <View style={{ flex: 1, marginLeft: 14 }}>
+            <Text style={styles.photoTitle}>Fotografía profesional *</Text>
+            <Text style={styles.photoSub}>
+              {subiendoFoto
+                ? `Subiendo imagen (${progresoFoto}%)...`
+                : fotoUrl
+                ? 'Fotografía cargada desde tu dispositivo'
+                : 'Selecciona una fotografía desde la galería de tu teléfono'}
+            </Text>
+
+            {subiendoFoto && (
+              <View style={styles.progressBarBg}>
+                <View style={[styles.progressBarFill, { width: `${progresoFoto}%` }]} />
+              </View>
+            )}
+
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+              <TouchableOpacity
+                style={styles.changePhotoBtn}
+                onPress={handleSeleccionarFotoDispositivo}
+                disabled={subiendoFoto}
+              >
+                <Feather name="upload" size={13} color={colors.primary} />
+                <Text style={styles.changePhotoText}>
+                  {fotoUrl ? 'Cambiar fotografía' : 'Seleccionar del dispositivo'}
+                </Text>
+              </TouchableOpacity>
+
+              {fotoUrl && !subiendoFoto && (
+                <TouchableOpacity
+                  style={styles.removePhotoBtn}
+                  onPress={() => setFotoUrl(null)}
+                >
+                  <Feather name="trash-2" size={13} color="#C0392B" />
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         </View>
 
-        {/* Sección 1: Datos Personales */}
         <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.iconCircle}><Feather name="user" size={16} color={colors.primary} /></View>
-            <View>
-              <Text style={styles.sectionTitle}>Datos Personales y de Contacto</Text>
-              <Text style={styles.sectionSubtitle}>Información para tu credencial exclusiva</Text>
-            </View>
-          </View>
-
           <Text style={styles.label}>Nombre y Apellidos completos *</Text>
           <View style={styles.inputContainer}>
             <Feather name="user" size={18} color={colors.textGray} style={styles.inputIcon} />
-            <TextInput style={styles.input} placeholder="ej. Sofía Alarcón Morales" placeholderTextColor="#A0A0A0" />
+            <TextInput
+              style={styles.input}
+              value={nombre}
+              onChangeText={setNombre}
+              placeholder="Ingresa tu nombre completo"
+              placeholderTextColor="#A0A0A0"
+            />
           </View>
 
           <Text style={styles.label}>Correo electrónico profesional *</Text>
           <View style={styles.inputContainer}>
             <Feather name="at-sign" size={18} color={colors.textGray} style={styles.inputIcon} />
-            <TextInput style={styles.input} placeholder="ej. sofia.estilista@beautyflash.com" placeholderTextColor="#A0A0A0" keyboardType="email-address" />
+            <TextInput
+              style={styles.input}
+              value={correo}
+              onChangeText={setCorreo}
+              placeholder="profesional@ejemplo.com"
+              placeholderTextColor="#A0A0A0"
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
           </View>
 
-          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end'}}>
-             <Text style={styles.label}>Teléfono móvil *</Text>
-             <Text style={{fontSize: 10, color: colors.primary, marginBottom: 8}}>Verificación SMS</Text>
-          </View>
-          <View style={{flexDirection: 'row', gap: 10, marginBottom: 16}}>
-            <View style={[styles.inputContainer, {flex: 0.35, marginBottom: 0, paddingHorizontal: 12}]}>
-              <Text style={{color: colors.textDark, fontWeight: '500'}}>ES +34 <Feather name="chevron-down" size={14}/></Text>
-            </View>
-            <View style={[styles.inputContainer, {flex: 0.65, marginBottom: 0}]}>
-              <TextInput style={styles.input} placeholder="612 345 678" keyboardType="phone-pad" placeholderTextColor="#A0A0A0" />
-            </View>
+          <Text style={styles.label}>Teléfono celular (+57) *</Text>
+          <View style={styles.inputContainer}>
+            <Feather name="phone" size={18} color={colors.textGray} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              value={telefono}
+              onChangeText={setTelefono}
+              placeholder="300 000 0000"
+              keyboardType="phone-pad"
+              placeholderTextColor="#A0A0A0"
+            />
           </View>
 
-          <Text style={styles.label}>Contraseña de acceso segura *</Text>
+          <Text style={styles.label}>Contraseña segura *</Text>
           <View style={styles.inputContainer}>
             <Feather name="lock" size={18} color={colors.textGray} style={styles.inputIcon} />
-            <TextInput style={styles.input} placeholder="Mínimo 8 caracteres alfanuméricos" placeholderTextColor="#A0A0A0" secureTextEntry={!verClave} />
-            <TouchableOpacity onPress={() => setVerClave(!verClave)} style={{padding: 5}}>
-              <Feather name={verClave ? "eye-off" : "eye"} size={18} color={colors.textGray} />
+            <TextInput
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Mínimo 6 caracteres"
+              placeholderTextColor="#A0A0A0"
+              secureTextEntry={!verClave}
+            />
+            <TouchableOpacity onPress={() => setVerClave(!verClave)} style={{ padding: 5 }}>
+              <Feather name={verClave ? 'eye-off' : 'eye'} size={18} color={colors.textGray} />
             </TouchableOpacity>
           </View>
-        </View>
 
-        {/* Sección 2: Especialidad y Experiencia */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.iconCircle}><MaterialCommunityIcons name="flower-outline" size={16} color={colors.primary} /></View>
-            <View>
-              <Text style={styles.sectionTitle}>Especialidad Principal y Experiencia</Text>
-              <Text style={styles.sectionSubtitle}>Elige tus disciplinas maestras</Text>
-            </View>
-          </View>
-
+          <Text style={styles.label}>Barrio / Zona de Cobertura *</Text>
           <View style={styles.pillsContainer}>
-            <TouchableOpacity style={[styles.pill, styles.pillActive]}><Feather name="scissors" size={14} color="#FFF"/> <Text style={styles.pillTextActive}>Peluquería & Color</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.pill}><Feather name="edit-2" size={14} color={colors.textDark}/> <Text style={styles.pillText}>Maquillaje & Novias</Text></TouchableOpacity>
+            {BARRIOS_DISPONIBLES.map((b) => (
+              <TouchableOpacity
+                key={b}
+                style={[styles.pill, barrio === b && styles.pillActive]}
+                onPress={() => setBarrio(b)}
+              >
+                <Text style={[styles.pillText, barrio === b && styles.pillTextActive]}>{b}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
 
-          <Text style={styles.label}>Años de experiencia profesional *</Text>
-          <View style={styles.rowOptions}>
-            {['1 a 3 años', '3 a 5 años', '+5 años (Master)'].map((opt, i) => {
-              const val = ['1a3', '3a5', '5mas'][i];
-              const active = experiencia === val;
-              return (
-                <TouchableOpacity key={i} style={[styles.optionBox, active && styles.optionBoxActive]} onPress={() => setExperiencia(val)}>
-                  <Text style={[styles.optionText, active && styles.optionTextActive]}>{opt}</Text>
-                </TouchableOpacity>
-              )
-            })}
-          </View>
+          <Text style={styles.label}>Modalidad de trabajo *</Text>
+          {[
+            { id: 'domicilio', label: 'Solo a domicilio' },
+            { id: 'local', label: 'En establecimiento físico' },
+            { id: 'ambos', label: 'Ambas modalidades (Establecimiento y Domicilio)' },
+          ].map((opt) => {
+            const active = modalidad === opt.id;
+            return (
+              <TouchableOpacity
+                key={opt.id}
+                style={[styles.radioRow, active && styles.radioRowActive]}
+                onPress={() => setModalidad(opt.id)}
+              >
+                <Feather
+                  name={active ? 'check-circle' : 'circle'}
+                  size={18}
+                  color={active ? colors.primary : colors.textGray}
+                />
+                <Text style={styles.radioText}>{opt.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
 
-          <Text style={styles.label}>Modalidad de trabajo preferida *</Text>
-          {[['A Domicilio (Kit Móvil)', 'car', 'domicilio'], ['En mi propio Salón / Cabina', 'home', 'salon'], ['Ambas opciones (Híbrido)', 'link', 'hibrido']].map((opt, i) => (
-            <TouchableOpacity key={i} style={[styles.radioRow, modalidad === opt[2] && styles.radioRowActive]} onPress={() => setModalidad(opt[2])}>
-              <View style={[styles.radioCircle, modalidad === opt[2] && styles.radioCircleActive]}>
-                {modalidad === opt[2] && <View style={styles.radioInner} />}
+          {tieneEstablecimiento && (
+            <View style={styles.establishmentBox}>
+              <Text style={styles.estHeader}>HORARIO DE ATENCIÓN DEL ESTABLECIMIENTO</Text>
+              <Text style={styles.label}>Nombre del Establecimiento *</Text>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  value={nombreEstablecimiento}
+                  onChangeText={setNombreEstablecimiento}
+                  placeholder="Nombre de tu salón o estudio"
+                />
               </View>
-              <Feather name={opt[1]} size={16} color={colors.textDark} style={{marginHorizontal: 10}} />
-              <Text style={styles.radioText}>{opt[0]}</Text>
-            </TouchableOpacity>
-          ))}
+
+              <Text style={styles.label}>Dirección del Establecimiento *</Text>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  value={direccionEstablecimiento}
+                  onChangeText={setDireccionEstablecimiento}
+                  placeholder="Dirección exacta del local"
+                />
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Hora Apertura *</Text>
+                  <View style={styles.inputContainer}>
+                    <TextInput
+                      style={styles.input}
+                      value={horaApertura}
+                      onChangeText={setHoraApertura}
+                    />
+                  </View>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Hora Cierre *</Text>
+                  <View style={styles.inputContainer}>
+                    <TextInput
+                      style={styles.input}
+                      value={horaCierre}
+                      onChangeText={setHoraCierre}
+                    />
+                  </View>
+                </View>
+              </View>
+
+              <Text style={styles.label}>Bloques de Horario Disponibles *</Text>
+              <View style={styles.pillsContainer}>
+                {BLOQUES_HORARIOS_ESTANDAR.map((h) => {
+                  const sel = bloquesSeleccionados.includes(h);
+                  return (
+                    <TouchableOpacity
+                      key={h}
+                      style={[styles.pill, sel && styles.pillActive]}
+                      onPress={() => toggleBloqueHorario(h)}
+                    >
+                      <Text style={[styles.pillText, sel && styles.pillTextActive]}>{h}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
         </View>
 
-        {/* Checkboxes & Button */}
-        <TouchableOpacity style={styles.checkboxRow} onPress={() => setTerminosAceptados(!terminosAceptados)}>
-          <View style={[styles.checkbox, terminosAceptados && styles.checkboxActive]}>
-            {terminosAceptados && <Feather name="check" size={14} color="#FFF" />}
-          </View>
-          <Text style={styles.checkboxLabel}>Acepto los <Text style={styles.linkText}>Términos y Condiciones</Text> y la <Text style={styles.linkText}>Política de Privacidad</Text></Text>
+        <TouchableOpacity
+          style={styles.mainBtn}
+          onPress={handleRegistrarProfesional}
+          disabled={cargando}
+        >
+          {cargando ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <>
+              <Text style={styles.mainBtnText}>Completar Registro Profesional</Text>
+              <Feather name="arrow-right" size={18} color="#FFFFFF" style={{ marginLeft: 8 }} />
+            </>
+          )}
         </TouchableOpacity>
-
-        <TouchableOpacity style={styles.mainButton} onPress={() => navigation.navigate('SpecialistProfileSetup')}>
-          <Text style={styles.mainButtonText}>Continuar a Experiencia y Tarifas</Text>
-          <Feather name="arrow-right" size={18} color="#FFF" style={{marginLeft: 8}} />
-        </TouchableOpacity>
-
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#FAFAFA' },
-  scrollContainer: { paddingHorizontal: 20, paddingBottom: 40 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, marginBottom: 16 },
-  backButton: { width: 40, height: 40, justifyContent: 'center' },
-  headerTitle: { fontSize: 16, fontWeight: '600', color: '#1E1E1E' },
-  heading: { fontSize: 24, fontWeight: '800', color: '#1E1E1E', marginBottom: 8 },
-  description: { fontSize: 13, color: '#707070', lineHeight: 20, marginBottom: 20 },
-  progressBox: { backgroundColor: '#F9F1EF', padding: 12, borderRadius: 8, marginBottom: 24 },
-  progressText: { fontSize: 11, fontWeight: '700', color: '#8B503E' },
-  progressBarBg: { height: 4, backgroundColor: '#EADCD7', borderRadius: 2 },
-  progressBarFill: { width: '33%', height: 4, backgroundColor: '#8B503E', borderRadius: 2 },
-  progressDisclaimer: { fontSize: 10, color: '#8B503E' },
-  section: { backgroundColor: '#FFFFFF', padding: 16, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: '#F0F0F0', elevation: 1 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  iconCircle: { width: 32, height: 32, borderRadius: 8, backgroundColor: '#FFF0ED', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#1E1E1E' },
-  sectionSubtitle: { fontSize: 11, color: '#707070' },
-  label: { fontSize: 12, fontWeight: '600', color: '#1E1E1E', marginBottom: 8 },
-  inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 10, paddingHorizontal: 12, height: 48, marginBottom: 16 },
-  inputIcon: { marginRight: 10 },
-  input: { flex: 1, fontSize: 14, color: '#1E1E1E' },
-  pillsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  pill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20 },
-  pillActive: { backgroundColor: '#8B503E' },
-  pillText: { fontSize: 12, fontWeight: '600', color: '#1E1E1E', marginLeft: 6 },
-  pillTextActive: { fontSize: 12, fontWeight: '600', color: '#FFFFFF', marginLeft: 6 },
-  rowOptions: { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  optionBox: { flex: 1, paddingVertical: 12, backgroundColor: '#F5F5F5', borderRadius: 10, alignItems: 'center' },
-  optionBoxActive: { backgroundColor: '#1E1E1E' },
-  optionText: { fontSize: 12, fontWeight: '600', color: '#707070' },
-  optionTextActive: { color: '#FFFFFF' },
-  radioRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', padding: 14, borderRadius: 10, marginBottom: 8 },
-  radioRowActive: { backgroundColor: '#FFF0ED' },
-  radioCircle: { width: 18, height: 18, borderRadius: 9, borderWidth: 1, borderColor: '#A0A0A0', alignItems: 'center', justifyContent: 'center' },
-  radioCircleActive: { borderColor: '#8B503E' },
-  radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#8B503E' },
-  radioText: { fontSize: 13, fontWeight: '500', color: '#1E1E1E' },
-  checkboxRow: { flexDirection: 'row', marginTop: 10, marginBottom: 20, paddingRight: 20 },
-  checkbox: { width: 18, height: 18, borderWidth: 1, borderColor: '#A0A0A0', borderRadius: 4, marginRight: 10, alignItems: 'center', justifyContent: 'center' },
-  checkboxActive: { backgroundColor: '#8B503E', borderColor: '#8B503E' },
-  checkboxLabel: { fontSize: 12, color: '#707070', flex: 1, lineHeight: 18 },
-  linkText: { color: '#8B503E', textDecorationLine: 'underline' },
-  mainButton: { backgroundColor: '#8B503E', flexDirection: 'row', borderRadius: 12, paddingVertical: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
-  mainButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  safeArea: { flex: 1, backgroundColor: colors.background },
+  scrollContainer: { paddingTop: 14, paddingBottom: 40 },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: { fontSize: 16, fontWeight: '800', color: colors.textDark },
+  heading: { fontSize: 24, fontWeight: '800', color: colors.textDark, marginBottom: 6 },
+  description: { fontSize: 13, color: colors.textGray, lineHeight: 19, marginBottom: 16 },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FDEDEC',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 14,
+  },
+  errorText: { flex: 1, fontSize: 12.5, color: '#C0392B', fontWeight: '600' },
+  photoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 16,
+  },
+  avatarImg: { width: 68, height: 68, borderRadius: 34 },
+  avatarPlaceholder: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#F3EFEA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  photoTitle: { fontSize: 13.5, fontWeight: '700', color: colors.textDark },
+  photoSub: { fontSize: 11.5, color: colors.textGray, marginTop: 2 },
+  progressBarBg: {
+    width: '100%',
+    height: 5,
+    backgroundColor: '#EAE4DC',
+    borderRadius: 3,
+    marginTop: 6,
+    overflow: 'hidden',
+  },
+  progressBarFill: { height: '100%', backgroundColor: colors.primary },
+  changePhotoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#F6EFEB',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 10,
+  },
+  changePhotoText: { fontSize: 12, fontWeight: '700', color: colors.primary },
+  removePhotoBtn: {
+    backgroundColor: '#FDEDEC',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  section: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 16,
+  },
+  label: { fontSize: 12, fontWeight: '700', color: colors.textDark, marginBottom: 6 },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8F6F4',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    height: 46,
+    marginBottom: 12,
+  },
+  inputIcon: { marginRight: 8 },
+  input: { flex: 1, fontSize: 13.5, color: colors.textDark },
+  pillsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  pill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#F8F6F4',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  pillActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  pillText: { fontSize: 12, fontWeight: '700', color: colors.textDark },
+  pillTextActive: { color: '#FFFFFF' },
+  radioRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 8,
+  },
+  radioRowActive: { borderColor: colors.primary, backgroundColor: '#FDECE7' },
+  radioText: { fontSize: 13, fontWeight: '700', color: colors.textDark },
+  establishmentBox: {
+    marginTop: 10,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: '#FAF5F2',
+    borderWidth: 1,
+    borderColor: '#E6D5CC',
+  },
+  estHeader: { fontSize: 11, fontWeight: '800', color: colors.primary, marginBottom: 10 },
+  mainBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingVertical: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mainBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
 });

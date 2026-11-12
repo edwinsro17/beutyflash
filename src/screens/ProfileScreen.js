@@ -1,3 +1,9 @@
+/**
+ * Archivo: src/screens/ProfileScreen.js
+ * Perfil del Cliente con selección de fotografía desde el dispositivo (expo-image-picker)
+ * y persistencia en Supabase Storage y tabla `usuarios`. Cero emojis.
+ */
+
 import React, { useState } from 'react';
 import {
   StyleSheet,
@@ -6,568 +12,391 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  Switch
+  Switch,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
-import { colors } from '../theme/colors';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import {
+  colors,
+  sessionStore,
+  SUPABASE_URL,
+  SUPABASE_PUBLISHABLE_KEY,
+  BARRIOS_DISPONIBLES,
+  seleccionarYSubirFotografiaDispositivo,
+  cerrarSesionActiva,
+  useResponsiveLayout,
+} from '../theme/colors';
 import BottomMenu from '../components/BottomMenu';
 
-export default function ProfileScreen() {
-  // Estados para los switches interactivos de notificaciones
+export default function ProfileScreen({ navigation }) {
+  const layout = useResponsiveLayout();
+  const cliente = sessionStore.clientUser;
+  const [fotoUrl, setFotoUrl] = useState(cliente.foto_perfil_url);
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
+  const [progresoFoto, setProgresoFoto] = useState(0);
+  const [nombre, setNombre] = useState(cliente.nombre_completo || '');
+  const [telefono, setTelefono] = useState(cliente.telefono || '');
+  const [barrio, setBarrio] = useState(cliente.barrio || '');
+  const [direccion, setDireccion] = useState(cliente.direccion_principal || '');
+  const [editando, setEditando] = useState(false);
+  const [mensajeGuardado, setMensajeGuardado] = useState('');
   const [smsReminders, setSmsReminders] = useState(true);
-  const [exclusivePromos, setExclusivePromos] = useState(true);
+  const [pushNotifs, setPushNotifs] = useState(true);
+
+  const handleSeleccionarFotoDispositivo = async () => {
+    setMensajeGuardado('');
+    setSubiendoFoto(true);
+    setProgresoFoto(15);
+    try {
+      const res = await seleccionarYSubirFotografiaDispositivo({
+        carpeta: 'clientes',
+        usuarioId: cliente.id,
+        onProgress: (p) => setProgresoFoto(p),
+      });
+      if (res && res.urlPublica) {
+        setFotoUrl(res.urlPublica);
+        sessionStore.clientUser.foto_perfil_url = res.urlPublica;
+        if (cliente.correo) {
+          await fetch(
+            `${SUPABASE_URL}/rest/v1/usuarios?email=eq.${encodeURIComponent(cliente.correo)}`,
+            {
+              method: 'PATCH',
+              headers: {
+                apikey: SUPABASE_PUBLISHABLE_KEY,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ avatar_url: res.urlPublica }),
+            }
+          );
+        }
+        setMensajeGuardado('Fotografía actualizada correctamente.');
+      }
+    } catch (err) {
+      setMensajeGuardado(err.message || 'No se pudo cargar la fotografía.');
+    } finally {
+      setSubiendoFoto(false);
+    }
+  };
+
+  const guardarCambiosPerfil = async () => {
+    sessionStore.clientUser.foto_perfil_url = fotoUrl;
+    sessionStore.clientUser.nombre_completo = nombre.trim();
+    sessionStore.clientUser.telefono = telefono.trim();
+    sessionStore.clientUser.barrio = barrio;
+    sessionStore.clientUser.direccion_principal = direccion.trim();
+    setEditando(false);
+
+    if (cliente.correo) {
+      try {
+        await fetch(
+          `${SUPABASE_URL}/rest/v1/usuarios?email=eq.${encodeURIComponent(cliente.correo)}`,
+          {
+            method: 'PATCH',
+            headers: {
+              apikey: SUPABASE_PUBLISHABLE_KEY,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              nombre: nombre.trim(),
+              telefono: telefono.trim(),
+              barrio,
+              direccion_principal: direccion.trim(),
+              avatar_url: fotoUrl,
+            }),
+          }
+        );
+      } catch (_e) {}
+    }
+    setMensajeGuardado('Datos de perfil guardados en la base de datos.');
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-        
-        {/* 1. Header idéntico al que ya tienes en HomeScreen */}
+      <ScrollView
+        contentContainerStyle={[styles.scrollContainer, layout.contentContainerStyle]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.header}>
           <View style={styles.logoRow}>
             <Text style={styles.logoBeauty}>Beauty</Text>
             <Text style={styles.logoFlash}>Flash</Text>
           </View>
-          <TouchableOpacity>
-            <Image 
-              source={{ uri: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop' }} 
-              style={styles.profilePic} 
-            />
+          <TouchableOpacity
+            style={styles.editTopBtn}
+            onPress={() => (editando ? guardarCambiosPerfil() : setEditando(true))}
+          >
+            <Feather name={editando ? 'check' : 'edit-2'} size={14} color="#FFFFFF" />
+            <Text style={styles.editTopBtnText}>
+              {editando ? 'Guardar' : 'Editar Perfil'}
+            </Text>
           </TouchableOpacity>
         </View>
 
-        {/* 2. Tarjeta Principal de Perfil (Valentina Morales) */}
+        {mensajeGuardado ? (
+          <View style={styles.infoBanner}>
+            <Feather name="check-circle" size={15} color="#1E824C" />
+            <Text style={styles.infoBannerText}>{mensajeGuardado}</Text>
+          </View>
+        ) : null}
+
         <View style={styles.profileHeroCard}>
           <View style={styles.avatarContainer}>
-            <Image 
-              source={{ uri: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop' }} 
-              style={styles.heroAvatar} 
-            />
-            <TouchableOpacity style={styles.editAvatarBtn} activeOpacity={0.8}>
-              <Feather name="edit-2" size={12} color="#FFFFFF" />
+            {fotoUrl ? (
+              <Image source={{ uri: fotoUrl }} style={styles.heroAvatar} />
+            ) : (
+              <View style={styles.avatarPlaceholder}>
+                <Feather name="user" size={28} color={colors.textGray} />
+              </View>
+            )}
+            <TouchableOpacity
+              style={styles.cameraBadge}
+              onPress={handleSeleccionarFotoDispositivo}
+              disabled={subiendoFoto}
+            >
+              <Feather name="camera" size={14} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
 
+          <TouchableOpacity onPress={handleSeleccionarFotoDispositivo} disabled={subiendoFoto}>
+            <Text style={styles.changePhotoLink}>
+              {subiendoFoto
+                ? `Subiendo fotografía (${progresoFoto}%)...`
+                : 'Seleccionar fotografía del dispositivo'}
+            </Text>
+          </TouchableOpacity>
+
           <View style={styles.nameRow}>
-            <Text style={styles.userName}>Valentina Morales</Text>
-            <MaterialCommunityIcons name="check-decagram" size={18} color="#8D5B4C" />
+            <Text style={styles.userName}>{nombre || 'Cliente'}</Text>
+            <MaterialCommunityIcons name="check-decagram" size={18} color={colors.primary} />
           </View>
-
-          <View style={styles.vipBadge}>
-            <View style={styles.vipDot} />
-            <Text style={styles.vipText}>CLIENTE VERIFICADA VIP</Text>
-          </View>
-
-          <View style={styles.contactInfo}>
-            <View style={styles.contactRow}>
-              <Feather name="phone" size={12} color={colors.textGray || '#7A7571'} />
-              <Text style={styles.contactText}>+34 612 345 678</Text>
-            </View>
-            <View style={styles.contactRow}>
-              <Feather name="mail" size={12} color={colors.textGray || '#7A7571'} />
-              <Text style={styles.contactText}>valen.morales@example.com</Text>
-            </View>
-          </View>
+          <Text style={styles.contactText}>
+            {barrio ? `${barrio} • ` : ''}
+            {cliente.correo}
+          </Text>
         </View>
 
-        {/* 3. Banner: Historial de Reservas */}
-        <TouchableOpacity style={styles.historyBanner} activeOpacity={0.85}>
-          <View style={styles.historyIconBox}>
-            <MaterialCommunityIcons name="calendar-check-outline" size={22} color="#FFFFFF" />
-          </View>
-          <View style={styles.historyInfo}>
-            <View style={styles.historyTitleRow}>
-              <Text style={styles.historyTitle}>Historial de Reservas</Text>
-              <View style={styles.notificationDot} />
-            </View>
-            <Text style={styles.historySubtitle}>3 citas completadas • 1 próxima</Text>
-          </View>
-          <Feather name="chevron-right" size={18} color={colors.textDark || '#2C2623'} />
-        </TouchableOpacity>
+        <View style={styles.formCard}>
+          <Text style={styles.sectionTitle}>INFORMACIÓN PERSONAL Y UBICACIÓN</Text>
 
-        {/* 4. Sección: Ubicaciones Guardadas */}
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Ubicaciones Guardadas</Text>
-          <Text style={styles.sectionMeta}>1 activa</Text>
+          <Text style={styles.fieldLabel}>Nombre Completo</Text>
+          <TextInput
+            style={[styles.input, !editando && styles.inputDisabled]}
+            value={nombre}
+            onChangeText={setNombre}
+            editable={editando}
+          />
+
+          <Text style={styles.fieldLabel}>Teléfono Celular</Text>
+          <TextInput
+            style={[styles.input, !editando && styles.inputDisabled]}
+            value={telefono}
+            onChangeText={setTelefono}
+            editable={editando}
+            keyboardType="phone-pad"
+          />
+
+          <Text style={styles.fieldLabel}>Zona / Barrio</Text>
+          <View style={styles.pillsRow}>
+            {BARRIOS_DISPONIBLES.map((b) => {
+              const sel = barrio === b;
+              return (
+                <TouchableOpacity
+                  key={b}
+                  style={[styles.barrioChip, sel && styles.barrioChipActive]}
+                  onPress={() => {
+                    setBarrio(b);
+                    sessionStore.clientUser.barrio = b;
+                  }}
+                >
+                  <Text style={[styles.barrioChipText, sel && { color: '#FFFFFF' }]}>{b}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <Text style={styles.fieldLabel}>Dirección Principal</Text>
+          <TextInput
+            style={[styles.input, !editando && styles.inputDisabled]}
+            value={direccion}
+            onChangeText={setDireccion}
+            editable={editando}
+          />
         </View>
 
         <View style={styles.cardItem}>
-          <View style={styles.softIconBox}>
-            <Feather name="home" size={18} color="#8D5B4C" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardItemTitle}>Notificaciones Push</Text>
+            <Text style={styles.cardItemSubtitle}>Actualizaciones de tus solicitudes</Text>
           </View>
-          <View style={styles.cardItemContent}>
-            <View style={styles.titleTagRow}>
-              <Text style={styles.cardItemTitle}>Casa</Text>
-              <View style={styles.tagBeige}>
-                <Text style={styles.tagBeigeText}>Principal</Text>
-              </View>
-            </View>
-            <Text style={styles.cardItemSubtitle}>C/ Serrano 42, 3ºB, Madrid</Text>
-            <View style={styles.accessNoteRow}>
-              <Feather name="lock" size={10} color={colors.textGray || '#7A7571'} />
-              <Text style={styles.accessNoteText}>Acceso con portero físico</Text>
-            </View>
-          </View>
-          <TouchableOpacity style={styles.moreIconBtn}>
-            <Feather name="more-vertical" size={16} color={colors.textGray || '#7A7571'} />
-          </TouchableOpacity>
+          <Switch
+            value={pushNotifs}
+            onValueChange={setPushNotifs}
+            trackColor={{ false: '#EAEAEA', true: colors.tertiary }}
+            thumbColor="#FFFFFF"
+          />
         </View>
 
-        <TouchableOpacity style={styles.dashedAddBtn} activeOpacity={0.7}>
-          <Feather name="plus" size={15} color={colors.textDark || '#2C2623'} />
-          <Text style={styles.dashedAddBtnText}>Añadir otra dirección</Text>
-        </TouchableOpacity>
-
-        {/* 5. Sección: Métodos de Pago */}
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Métodos de Pago</Text>
-          <MaterialCommunityIcons name="shield-check-outline" size={16} color={colors.textGray || '#7A7571'} />
+        <View style={styles.cardItem}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardItemTitle}>Avisos por SMS</Text>
+            <Text style={styles.cardItemSubtitle}>Confirmaciones a tu número celular</Text>
+          </View>
+          <Switch
+            value={smsReminders}
+            onValueChange={setSmsReminders}
+            trackColor={{ false: '#EAEAEA', true: colors.tertiary }}
+            thumbColor="#FFFFFF"
+          />
         </View>
 
-        {/* Tarjeta Mastercard */}
-        <TouchableOpacity style={styles.cardItem} activeOpacity={0.85}>
-          <View style={styles.softIconBox}>
-            <Feather name="credit-card" size={18} color="#8D5B4C" />
-          </View>
-          <View style={styles.cardItemContent}>
-            <View style={styles.titleTagRow}>
-              <Text style={styles.cardItemTitle}>Mastercard</Text>
-              <View style={styles.tagRose}>
-                <Text style={styles.tagRoseText}>Predeterminada</Text>
-              </View>
-            </View>
-            <Text style={styles.cardItemSubtitle}>•••• 4821 • Expira 09/27</Text>
-          </View>
-          <Ionicons name="checkmark-circle" size={20} color="#8D5B4C" />
+        <TouchableOpacity
+          style={styles.logoutBtn}
+          onPress={() => cerrarSesionActiva(navigation)}
+        >
+          <Feather name="log-out" size={16} color="#C0392B" />
+          <Text style={styles.logoutText}>Cerrar Sesión de Cliente</Text>
         </TouchableOpacity>
-
-        {/* Apple Pay */}
-        <TouchableOpacity style={[styles.cardItem, { marginTop: 10 }]} activeOpacity={0.85}>
-          <View style={styles.softIconBox}>
-            <MaterialCommunityIcons name="contactless-payment-circle-outline" size={20} color={colors.textDark || '#2C2623'} />
-          </View>
-          <View style={styles.cardItemContent}>
-            <Text style={styles.cardItemTitle}>Apple Pay</Text>
-            <Text style={styles.cardItemSubtitle}>Vinculado a Wallet</Text>
-          </View>
-          <Feather name="chevron-right" size={18} color={colors.textGray || '#7A7571'} />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.dashedAddBtn} activeOpacity={0.7}>
-          <Feather name="plus" size={15} color={colors.textDark || '#2C2623'} />
-          <Text style={styles.dashedAddBtnText}>Añadir método de pago</Text>
-        </TouchableOpacity>
-
-        {/* 6. Sección: Preferencias y Notificaciones */}
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Preferencias y Notificaciones</Text>
-        </View>
-
-        <View style={styles.preferencesGroupCard}>
-          {/* Fila 1: SMS */}
-          <View style={styles.preferenceRow}>
-            <View style={styles.softIconBox}>
-              <Feather name="message-square" size={17} color={colors.textDark || '#2C2623'} />
-            </View>
-            <View style={styles.preferenceInfo}>
-              <Text style={styles.cardItemTitle}>Recordatorios por SMS</Text>
-              <Text style={styles.cardItemSubtitle}>Avisos de tus citas 2h antes</Text>
-            </View>
-            <Switch
-              value={smsReminders}
-              onValueChange={setSmsReminders}
-              trackColor={{ false: '#DFDAD4', true: '#C88D7C' }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-
-          <View style={styles.divider} />
-
-          {/* Fila 2: Promociones */}
-          <View style={styles.preferenceRow}>
-            <View style={styles.softIconBox}>
-              <Feather name="tag" size={17} color={colors.textDark || '#2C2623'} />
-            </View>
-            <View style={styles.preferenceInfo}>
-              <Text style={styles.cardItemTitle}>Promociones exclusivas</Text>
-              <Text style={styles.cardItemSubtitle}>Ofertas flash y acceso anticipado</Text>
-            </View>
-            <Switch
-              value={exclusivePromos}
-              onValueChange={setExclusivePromos}
-              trackColor={{ false: '#DFDAD4', true: '#C88D7C' }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-        </View>
-
-        {/* 7. Botones Inferiores: Ayuda y Cerrar Sesión */}
-        <TouchableOpacity style={styles.helpButton} activeOpacity={0.8}>
-          <View style={styles.helpLeft}>
-            <Feather name="headphones" size={17} color={colors.textDark || '#2C2623'} />
-            <Text style={styles.helpButtonText}>Centro de Ayuda y Concierge</Text>
-          </View>
-          <Feather name="external-link" size={16} color={colors.textGray || '#7A7571'} />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.logoutButton} activeOpacity={0.8}>
-          <Feather name="log-out" size={16} color="#B93829" />
-          <Text style={styles.logoutButtonText}>Cerrar Sesión</Text>
-        </TouchableOpacity>
-
       </ScrollView>
 
-      {/* Menú Inferior Fijo activado en Perfil */}
-      <BottomMenu activeTab="Perfil" />
+      <BottomMenu activeTab="Perfil" navigation={navigation} />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.background || '#FAF8F5',
-  },
-  scrollContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 28,
-  },
-
-  // 1. Header (Mismo estilo exacto de HomeScreen)
+  safeArea: { flex: 1, backgroundColor: colors.background },
+  scrollContainer: { paddingTop: 14, paddingBottom: 30 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 18,
-  },
-  logoRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-  },
-  logoBeauty: {
-    fontSize: 32,
-    fontStyle: 'italic',
-    fontWeight: '300',
-    color: colors.textDark || '#2C2623',
-  },
-  logoFlash: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#8D5B4C',
-  },
-  profilePic: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: '#F3EFEA',
-  },
-
-  // 2. Tarjeta Hero de Perfil
-  profileHeroCard: {
-    backgroundColor: colors.surface || '#FFFFFF',
-    borderRadius: 22,
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    alignItems: 'center',
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.03,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
   },
-  avatarContainer: {
-    position: 'relative',
-    marginBottom: 14,
+  logoRow: { flexDirection: 'row', alignItems: 'center' },
+  logoBeauty: { fontSize: 22, fontStyle: 'italic', color: colors.textDark },
+  logoFlash: { fontSize: 22, fontWeight: '800', color: colors.primary },
+  editTopBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: 12,
   },
-  heroAvatar: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
+  editTopBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  infoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#E8F6EF',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 12,
   },
-  editAvatarBtn: {
+  infoBannerText: { fontSize: 12, fontWeight: '700', color: '#1E824C' },
+  profileHeroCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 16,
+  },
+  avatarContainer: { position: 'relative', marginBottom: 6 },
+  heroAvatar: { width: 84, height: 84, borderRadius: 42 },
+  avatarPlaceholder: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: '#F3EFEA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cameraBadge: {
     position: 'absolute',
     bottom: 0,
     right: 0,
+    backgroundColor: colors.primary,
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#8D5B4C',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: '#FFFFFF',
   },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+  changePhotoLink: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
     marginBottom: 8,
   },
-  userName: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: colors.textDark || '#2C2623',
-  },
-  vipBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F5EFEA',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 14,
-    gap: 6,
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  userName: { fontSize: 19, fontWeight: '800', color: colors.textDark },
+  contactText: { fontSize: 12, color: colors.textGray },
+  formCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
     marginBottom: 14,
   },
-  vipDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#8D5B4C',
+  sectionTitle: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    color: colors.textGray,
+    letterSpacing: 0.7,
+    marginBottom: 10,
   },
-  vipText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#8D5B4C',
-    letterSpacing: 0.5,
-  },
-  contactInfo: {
-    alignItems: 'center',
-    gap: 5,
-  },
-  contactRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  contactText: {
-    fontSize: 12,
-    color: colors.textGray || '#7A7571',
-  },
-
-  // 3. Banner Historial de Reservas
-  historyBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#EBE6E0',
-    borderRadius: 18,
-    padding: 14,
-    marginBottom: 24,
-    gap: 14,
-  },
-  historyIconBox: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
-    backgroundColor: '#8D5B4C',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  historyInfo: {
-    flex: 1,
-  },
-  historyTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  historyTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.textDark || '#2C2623',
-  },
-  notificationDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#C87D6B',
-  },
-  historySubtitle: {
-    fontSize: 12,
-    color: colors.textGray || '#7A7571',
-    marginTop: 2,
-  },
-
-  // Encabezados de sección
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  fieldLabel: { fontSize: 12, fontWeight: '700', color: colors.textDark, marginBottom: 5 },
+  input: {
+    backgroundColor: '#F8F6F4',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13.5,
+    color: colors.textDark,
     marginBottom: 12,
   },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.textDark || '#2C2623',
+  inputDisabled: { opacity: 0.85 },
+  pillsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
+  barrioChip: {
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 9,
+    backgroundColor: '#F8F6F4',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  sectionMeta: {
-    fontSize: 11,
-    color: colors.textGray || '#7A7571',
-    fontWeight: '500',
-  },
-
-  // Tarjetas de listas (Ubicaciones y Pagos)
+  barrioChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  barrioChipText: { fontSize: 11.5, fontWeight: '700', color: colors.textDark },
   cardItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface || '#FFFFFF',
+    backgroundColor: colors.surface,
     borderRadius: 16,
     padding: 14,
-    gap: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.02,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
-  },
-  softIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: '#F3EFEA',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardItemContent: {
-    flex: 1,
-  },
-  titleTagRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 2,
-  },
-  cardItemTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.textDark || '#2C2623',
-  },
-  cardItemSubtitle: {
-    fontSize: 12,
-    color: colors.textGray || '#7A7571',
-  },
-  tagBeige: {
-    backgroundColor: '#F3EFEA',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  tagBeigeText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#8D5B4C',
-  },
-  tagRose: {
-    backgroundColor: '#F9E6E2',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  tagRoseText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#B85D4B',
-  },
-  accessNoteRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 4,
-  },
-  accessNoteText: {
-    fontSize: 11,
-    color: colors.textGray || '#7A7571',
-  },
-  moreIconBtn: {
-    padding: 4,
-  },
-
-  // Botón "+ Añadir..."
-  dashedAddBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F3EFEA',
-    borderRadius: 14,
-    paddingVertical: 12,
-    marginTop: 10,
-    marginBottom: 24,
-    gap: 6,
     borderWidth: 1,
-    borderColor: '#E5DFD7',
-  },
-  dashedAddBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textDark || '#2C2623',
-  },
-
-  // 6. Preferencias y Notificaciones
-  preferencesGroupCard: {
-    backgroundColor: colors.surface || '#FFFFFF',
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    marginBottom: 22,
-    shadowColor: '#000',
-    shadowOpacity: 0.02,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
-  },
-  preferenceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    gap: 12,
-  },
-  preferenceInfo: {
-    flex: 1,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#F3EFEA',
-  },
-
-  // 7. Botones Inferiores (Ayuda y Cerrar Sesión)
-  helpButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.surface || '#FFFFFF',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 15,
+    borderColor: colors.border,
     marginBottom: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.02,
-    shadowRadius: 6,
-    elevation: 1,
   },
-  helpLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  helpButtonText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textDark || '#2C2623',
-  },
-  logoutButton: {
+  cardItemTitle: { fontSize: 13.5, fontWeight: '800', color: colors.textDark },
+  cardItemSubtitle: { fontSize: 12, color: colors.textGray, marginTop: 2 },
+  logoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F5EFEA',
-    borderRadius: 16,
-    paddingVertical: 15,
     gap: 8,
+    paddingVertical: 15,
+    borderRadius: 14,
+    backgroundColor: '#FDEDEC',
+    marginTop: 6,
   },
-  logoutButtonText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#B93829',
-  },
+  logoutText: { fontSize: 14, fontWeight: '800', color: '#C0392B' },
 });

@@ -7,7 +7,14 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "BeautyFlash necesita tu ubicaci\u00f3n para mostrar profesionales cercanos y trazar rutas de servicio a domicilio.",
+        "NSPhotoLibraryUsageDescription": "BeautyFlash necesita acceso a tu galer\u00eda para seleccionar tu fotograf\u00eda de perfil y fotograf\u00edas de servicios."
+      },
+      "config": {
+        "googleMapsApiKey": "AIzaSyD6WqT0s_TLC2Va1n3RidhZa5MnAxMBAeA"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -20,7 +27,13 @@
         "googleMaps": {
           "apiKey": "AIzaSyD6WqT0s_TLC2Va1n3RidhZa5MnAxMBAeA"
         }
-      }
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "READ_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

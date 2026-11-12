@@ -1,242 +1,510 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, StatusBar } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+/**
+ * Archivo: src/screens/BilleteraScreen.js
+ * Billetera del Profesional con Simulación Realista de Pago con Tarjeta Bancaria
+ * (Número de tarjeta de 16 dígitos, Titular, Fecha de expiración MM/AA, CVC de 3 dígitos)
+ * y Recarga mínima de $10.000 COP.
+ */
 
-const colors = { background: '#FAFAFA', surface: '#FFFFFF', primary: '#8B503E', textDark: '#1E1E1E', textGray: '#707070', border: '#EAEAEA', accent: '#D89C8F' };
+import React, { useState } from 'react';
+import {
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
+  ScrollView,
+  TextInput,
+  StatusBar,
+  Alert,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { colors, sessionStore, formatCOP, callBackendApi, useResponsiveLayout, sincronizarEstadoDesdeSupabase } from '../theme/colors';
+
+const MONTOS_RAPIDOS = [10000, 20000, 50000, 100000];
 
 export default function BilleteraScreen({ navigation }) {
-  const [status, setStatus] = useState('Disponible');
-  const toggleStatus = () => {
-    if (status === 'Disponible') setStatus('Fuera de servicio');
-    else if (status === 'Fuera de servicio') setStatus('Ocupado');
-    else setStatus('Disponible');
-  };
-  const getStatusColor = () => status === 'Disponible' ? '#00C853' : status === 'Fuera de servicio' ? '#9E9E9E' : '#F57C00';
+  const layout = useResponsiveLayout();
+  const [saldo, setSaldo] = useState(sessionStore.wallet.saldo_disponible_cop);
+  const [transacciones, setTransacciones] = useState([...sessionStore.wallet.transacciones]);
+  const [montoInput, setMontoInput] = useState('20000');
 
-  const [timeFilter, setTimeFilter] = useState('Esta Semana');
+  // Datos realistas de Tarjeta de Crédito / Débito
+  const [numeroTarjeta, setNumeroTarjeta] = useState('4532 8910 3412 8891');
+  const [titularTarjeta, setTitularTarjeta] = useState(
+    (sessionStore.proUser.nombre_completo || 'SOFIA ALARCON').toUpperCase()
+  );
+  const [fechaExp, setFechaExp] = useState('08/29');
+  const [cvc, setCvc] = useState('482');
+  const [procesandoPago, setProcesandoPago] = useState(false);
+
+  const formatearTarjeta = (txt) => {
+    const soloDigitos = txt.replace(/\D/g, '').slice(0, 16);
+    const grupos = soloDigitos.match(/.{1,4}/g) || [];
+    setNumeroTarjeta(grupos.join(' '));
+  };
+
+  const formatearExp = (txt) => {
+    const limpio = txt.replace(/\D/g, '').slice(0, 4);
+    if (limpio.length >= 3) {
+      setFechaExp(`${limpio.slice(0, 2)}/${limpio.slice(2)}`);
+    } else {
+      setFechaExp(limpio);
+    }
+  };
+
+  const handleRecargarConTarjeta = async () => {
+    const monto = Math.round(Number(String(montoInput).replace(/\D/g, '')) || 0);
+    if (monto < 10000) {
+      Alert.alert(
+        'Recarga mínima: $10.000 COP',
+        `El valor mínimo de recarga es $10.000 COP. Ingresaste ${formatCOP(monto)} COP.`
+      );
+      return;
+    }
+
+    const digitosTarjeta = numeroTarjeta.replace(/\s/g, '');
+    if (digitosTarjeta.length < 15) {
+      Alert.alert('Número de tarjeta incompleto', 'Ingresa los 16 dígitos de tu tarjeta de crédito o débito.');
+      return;
+    }
+    if (!titularTarjeta.trim()) {
+      Alert.alert('Titular requerido', 'Ingresa el nombre completo como aparece en la tarjeta.');
+      return;
+    }
+    if (fechaExp.length < 4) {
+      Alert.alert('Fecha inválida', 'Ingresa el mes y año de vencimiento en formato MM/AA.');
+      return;
+    }
+    if (cvc.trim().length < 3) {
+      Alert.alert('CVC inválido', 'Ingresa los 3 dígitos del código de seguridad CVC al respaldo de tu tarjeta.');
+      return;
+    }
+
+    setProcesandoPago(true);
+    try {
+      await callBackendApi(`/wallet/${sessionStore.proUser.id}/recharge`, 'POST', {
+        monto_cop: monto,
+        metodo_pago: 'tarjeta',
+      });
+    } catch (_e) {}
+
+    const ultimos4 = digitosTarjeta.slice(-4);
+    const nuevoSaldo = sessionStore.wallet.saldo_disponible_cop + monto;
+    sessionStore.wallet.saldo_disponible_cop = nuevoSaldo;
+    sessionStore.wallet.total_recargado_cop += monto;
+    sessionStore.proUser.activo_por_saldo = true;
+    sessionStore.proUser.disponible = true;
+
+    const nuevaTx = {
+      id: `tx-${Date.now()}`,
+      tipo: 'recarga',
+      monto_cop: monto,
+      signo: 1,
+      saldo_posterior_cop: nuevoSaldo,
+      metodo_pago: `Tarjeta •••• ${ultimos4}`,
+      descripcion: `Recarga aprobada por ${formatCOP(monto)} COP con Tarjeta •••• ${ultimos4}`,
+      creado_en: 'Ahora mismo',
+    };
+    sessionStore.wallet.transacciones.unshift(nuevaTx);
+
+    setProcesandoPago(false);
+    setSaldo(nuevoSaldo);
+    setTransacciones([...sessionStore.wallet.transacciones]);
+
+    Alert.alert(
+      '¡Pago Aprobado y Saldo Recargado!',
+      `Transacción exitosa con tu tarjeta •••• ${ultimos4} por ${formatCOP(
+        monto
+      )} COP.\nNuevo saldo disponible: ${formatCOP(nuevoSaldo)} COP.`
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
-      
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Billetera</Text>
-        <View style={styles.navRight}>
-          <TouchableOpacity style={styles.statusDropdown} onPress={toggleStatus}>
-            <View style={[styles.statusDot, {backgroundColor: getStatusColor()}]} />
-            <Text style={styles.statusText}>{status}</Text>
-            <Feather name="chevron-down" size={14} color={colors.textGray} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn}><Feather name="bell" size={20} color={colors.textDark} /></TouchableOpacity>
-          <TouchableOpacity style={styles.profileBtn} onPress={() => navigation.navigate('MiPerfil')}><Feather name="user" size={16} color="#FFF" /></TouchableOpacity>
+        <Text style={styles.headerTitle}>Billetera & Pasarela (COP)</Text>
+        <View
+          style={[
+            styles.statusPill,
+            { backgroundColor: saldo >= 10000 ? '#E8F6EF' : '#FDEDEC' },
+          ]}
+        >
+          <Text
+            style={{
+              fontSize: 11,
+              fontWeight: '800',
+              color: saldo >= 10000 ? '#1E824C' : '#C0392B',
+            }}
+          >
+            {saldo >= 5000 ? 'Activo para servicios' : 'Inactivo (Saldo bajo)'}
+          </Text>
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16}}>
-          <Text style={styles.sectionTitle}>FINANZAS & FACTURACIÓN</Text>
-          <TouchableOpacity style={styles.reportBtn}><Feather name="file-text" size={12} color={colors.primary}/> <Text style={styles.reportBtnText}>Informe PDF</Text></TouchableOpacity>
-        </View>
-
-        {/* Tarjeta Principal de Saldo */}
+      <ScrollView contentContainerStyle={[styles.scroll, layout.contentContainerStyle]} showsVerticalScrollIndicator={false}>
         <View style={styles.balanceCard}>
-          <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16}}>
-            <View style={{flexDirection: 'row', alignItems: 'center'}}>
-              <Feather name="credit-card" size={14} color="#FFF" style={{marginRight: 8, opacity: 0.8}} />
-              <Text style={styles.balanceLabel}>Saldo disponible para retiro</Text>
-            </View>
-            <View style={styles.badgeReady}><View style={styles.dotGreen}/><Text style={styles.badgeReadyText}>Listo</Text></View>
-          </View>
-          <Text style={styles.balanceAmount}>485,50 <Text style={{fontSize: 24, fontWeight: '400'}}>€</Text></Text>
-          
-          <TouchableOpacity style={styles.transferBtn}>
-            <Feather name="zap" size={14} color={colors.primary} />
-            <Text style={styles.transferBtnText}>Transferir Fondos a Banco (Instantáneo)</Text>
-          </TouchableOpacity>
-          
-          <View style={styles.processingRow}>
-            <Text style={styles.processingLabel}>En proceso de liquidación:</Text>
-            <Text style={styles.processingVal}>120,00 € <Text style={{fontWeight: '400'}}>(Hoy)</Text></Text>
-          </View>
+          <Text style={styles.balanceLabel}>SALDO DISPONIBLE PARA COMISIONES (10%)</Text>
+          <Text style={styles.balanceAmount}>{formatCOP(saldo)} COP</Text>
+          <Text style={styles.balanceRule}>
+            Recarga mínima: $10.000 COP • Se descuenta el 10% únicamente al confirmar un servicio
+          </Text>
         </View>
 
-        {/* Filtros de Tiempo interactivos */}
-        <View style={styles.timeFilters}>
-          {['Esta Semana', 'Este Mes', 'Año 2025'].map(f => (
-            <TouchableOpacity key={f} style={[styles.timeBtn, timeFilter === f && styles.timeBtnActive]} onPress={() => setTimeFilter(f)}>
-              <Text style={[styles.timeBtnText, timeFilter === f && styles.timeBtnTextActive]}>{f}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Gráfico Simulado */}
-        <View style={styles.chartCard}>
-          <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16}}>
+        {/* Tarjeta Bancaria Visual Interactiva */}
+        <LinearGradient
+          colors={['#1A1A1A', '#3B251E', '#844D3B']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.creditCardVisual}
+        >
+          <View style={styles.cardTopRow}>
+            <MaterialCommunityIcons name="integrated-circuit-chip" size={32} color="#D48C70" />
+            <Text style={styles.cardBrand}>BEAUTYFLASH PAY • VISA / MASTERCARD</Text>
+          </View>
+          <Text style={styles.cardNumberPreview}>
+            {numeroTarjeta || '•••• •••• •••• ••••'}
+          </Text>
+          <View style={styles.cardBottomRow}>
             <View>
-              <Text style={styles.chartSub}>RITMO DE FACTURACIÓN</Text>
-              <Text style={styles.chartTitle}>Ingresos diarios</Text>
+              <Text style={styles.cardMiniLabel}>TITULAR DE LA TARJETA</Text>
+              <Text style={styles.cardHolderPreview}>
+                {titularTarjeta || 'NOMBRE DEL TITULAR'}
+              </Text>
             </View>
-            <View style={styles.trendBadge}><Feather name="trending-up" size={12} color="#2E7D32"/> <Text style={styles.trendText}>+18%</Text></View>
-          </View>
-          <View style={styles.barsContainer}>
-            {/* Alturas relativas simuladas */}
-            <View style={styles.barCol}><View style={[styles.bar, {height: 40}]}/><Text style={styles.barLabel}>L</Text></View>
-            <View style={styles.barCol}><View style={[styles.bar, {height: 60}]}/><Text style={styles.barLabel}>M</Text></View>
-            <View style={styles.barCol}><View style={[styles.bar, {height: 80}]}/><Text style={styles.barLabel}>X</Text></View>
-            <View style={styles.barCol}><View style={[styles.bar, {height: 50}]}/><Text style={styles.barLabel}>J</Text></View>
-            <View style={styles.barCol}><View style={[styles.bar, {height: 90}]}/><Text style={styles.barLabel}>V</Text></View>
-            <View style={styles.barCol}>
-              <Text style={styles.barPeak}>245€</Text>
-              <View style={[styles.bar, styles.barPeakActive, {height: 100}]}/>
-              <Text style={[styles.barLabel, {fontWeight: '700', color: colors.textDark}]}>S</Text>
+            <View>
+              <Text style={styles.cardMiniLabel}>VENCE</Text>
+              <Text style={styles.cardHolderPreview}>{fechaExp || 'MM/AA'}</Text>
             </View>
-            <View style={styles.barCol}><View style={[styles.bar, {height: 30}]}/><Text style={styles.barLabel}>D</Text></View>
+            <View>
+              <Text style={styles.cardMiniLabel}>CVC</Text>
+              <Text style={styles.cardHolderPreview}>{cvc ? '•••' : 'CVC'}</Text>
+            </View>
           </View>
-        </View>
+        </LinearGradient>
 
-        {/* Grid de Estadísticas */}
-        <View style={styles.statsGrid}>
-          <View style={styles.gridItem}>
-            <View style={styles.gridTop}><Text style={styles.gridLabel}>FACTURADO</Text><Feather name="dollar-sign" size={14} color={colors.textDark}/></View>
-            <Text style={styles.gridVal}>2.340,00 €</Text>
-            <Text style={styles.gridSubGreen}>+18% vs anterior</Text>
-          </View>
-          <View style={styles.gridItem}>
-            <View style={styles.gridTop}><Text style={styles.gridLabel}>CITAS</Text><Feather name="calendar" size={14} color={colors.textDark}/></View>
-            <Text style={styles.gridVal}>24 Citas</Text>
-            <Text style={styles.gridSub}>100% de asistencia</Text>
-          </View>
-          <View style={styles.gridItem}>
-            <View style={styles.gridTop}><Text style={styles.gridLabel}>TICKET MEDIO</Text><Feather name="activity" size={14} color={colors.textDark}/></View>
-            <Text style={styles.gridVal}>97,50 €</Text>
-            <Text style={styles.gridSub}>Por servicio prémium</Text>
-          </View>
-          <View style={styles.gridItem}>
-            <View style={styles.gridTop}><Text style={styles.gridLabel}>PROPINAS</Text><Feather name="heart" size={14} color={colors.textDark}/></View>
-            <Text style={styles.gridVal}>145,00 €</Text>
-            <Text style={styles.gridSub}>100% netas (0% com.)</Text>
-          </View>
-        </View>
+        {/* Formulario Realista de Tarjeta */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Datos de la Tarjeta y Monto a Recargar</Text>
 
-        {/* Cuenta Vinculada */}
-        <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12}}>
-          <Text style={styles.sectionTitle}>CUENTA DE COBRO VINCULADA</Text>
-          <Text style={styles.sectionDrag}>Configurar</Text>
-        </View>
-        <View style={styles.bankCard}>
-          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
-            <View style={{flexDirection: 'row', alignItems: 'center'}}>
-              <View style={styles.bankIcon}><MaterialCommunityIcons name="bank" size={20} color={colors.primary}/></View>
-              <View style={{marginLeft: 12}}>
-                <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                  <Text style={styles.bankTitle}>CaixaBank S.A. </Text>
-                  <Feather name="check-circle" size={12} color="#2E7D32"/>
-                </View>
-                <Text style={styles.bankSub}>IBAN •••• 9842</Text>
+          <Text style={styles.fieldLabel}>1. Selecciona o escribe el monto en COP (Mín. $10.000)</Text>
+          <View style={styles.pillsRow}>
+            {MONTOS_RAPIDOS.map((m) => {
+              const active = Number(montoInput) === m;
+              return (
+                <TouchableOpacity
+                  key={m}
+                  style={[styles.pill, active && styles.pillActive]}
+                  onPress={() => setMontoInput(String(m))}
+                >
+                  <Text style={[styles.pillText, active && { color: '#FFFFFF' }]}>
+                    {formatCOP(m)}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <TextInput
+            style={styles.input}
+            value={montoInput}
+            onChangeText={setMontoInput}
+            keyboardType="number-pad"
+            placeholder="Monto en COP (mínimo 10000)"
+          />
+
+          <Text style={styles.fieldLabel}>2. Número de Tarjeta (16 dígitos) *</Text>
+          <View style={styles.inputWithIcon}>
+            <Feather name="credit-card" size={17} color={colors.primary} />
+            <TextInput
+              style={styles.inputInner}
+              value={numeroTarjeta}
+              onChangeText={formatearTarjeta}
+              keyboardType="number-pad"
+              placeholder="4532 8910 3412 8891"
+              maxLength={19}
+            />
+          </View>
+
+          <Text style={styles.fieldLabel}>3. Nombre y Apellido del Titular *</Text>
+          <View style={styles.inputWithIcon}>
+            <Feather name="user" size={17} color={colors.primary} />
+            <TextInput
+              style={styles.inputInner}
+              value={titularTarjeta}
+              onChangeText={(t) => setTitularTarjeta(t.toUpperCase())}
+              placeholder="COMO APARECE EN LA TARJETA"
+              autoCapitalize="characters"
+            />
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fieldLabel}>4. Fecha Exp (MM/AA) *</Text>
+              <View style={styles.inputWithIcon}>
+                <Feather name="calendar" size={16} color={colors.primary} />
+                <TextInput
+                  style={styles.inputInner}
+                  value={fechaExp}
+                  onChangeText={formatearExp}
+                  keyboardType="number-pad"
+                  placeholder="08/29"
+                  maxLength={5}
+                />
               </View>
             </View>
-            <Text style={styles.stripeText}>Stripe Connect ✓</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fieldLabel}>5. Código CVC *</Text>
+              <View style={styles.inputWithIcon}>
+                <Feather name="lock" size={16} color={colors.primary} />
+                <TextInput
+                  style={styles.inputInner}
+                  value={cvc}
+                  onChangeText={(t) => setCvc(t.replace(/\D/g, '').slice(0, 4))}
+                  keyboardType="number-pad"
+                  placeholder="123"
+                  secureTextEntry
+                  maxLength={4}
+                />
+              </View>
+            </View>
           </View>
-          <View style={styles.bankFooter}>
-            <View style={styles.dotGreen}/><Text style={styles.bankFooterText}> Modo: Pago Flash Inmediato activo</Text>
-          </View>
+
+          <TouchableOpacity
+            style={styles.rechargeBtn}
+            onPress={handleRecargarConTarjeta}
+            disabled={procesandoPago}
+          >
+            <Feather name="shield" size={16} color="#FFFFFF" />
+            <Text style={styles.rechargeBtnText}>
+              Pagar y Recargar {formatCOP(Number(montoInput) || 0)} COP
+            </Text>
+          </TouchableOpacity>
         </View>
 
+        <Text style={styles.sectionTitle}>HISTORIAL DE RECARGAS Y COMISIONES (10%)</Text>
+        {transacciones.map((tx) => (
+          <View key={tx.id} style={styles.txRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.txDesc}>{tx.descripcion}</Text>
+              <Text style={styles.txMeta}>
+                {tx.creado_en} • Saldo posterior: {formatCOP(tx.saldo_posterior_cop)}
+              </Text>
+            </View>
+            <Text
+              style={[
+                styles.txAmount,
+                { color: tx.signo > 0 ? '#1E824C' : '#C0392B' },
+              ]}
+            >
+              {tx.signo > 0 ? '+' : '-'}
+              {formatCOP(tx.monto_cop)}
+            </Text>
+          </View>
+        ))}
       </ScrollView>
-      <BottomNav navigation={navigation} active="Billetera" />
+
+      <ProBottomNav navigation={navigation} active="Billetera" />
     </SafeAreaView>
   );
 }
-// Agrega esto al final de ServiciosScreen.js, AgendaScreen.js, BilleteraScreen.js y MiPerfilScreen.js
-const BottomNav = ({ navigation, active }) => {
+
+export function ProBottomNav({ navigation, active }) {
+  const noLeidas = (sessionStore.notificacionesProfesional || []).filter((n) => !n.leida).length;
   const navItems = [
-    { id: 'ProDashboard', icon: 'view-grid', iconType: 'material', label: 'Dashboard' },
+    { id: 'ProDashboard', icon: 'view-grid', iconType: 'material', label: 'Solicitudes', badge: noLeidas },
     { id: 'Agenda', icon: 'calendar', iconType: 'feather', label: 'Agenda' },
-    { id: 'Servicios', icon: 'flower-outline', iconType: 'material', label: 'Servicios' },
+    { id: 'Servicios', icon: 'flower-outline', iconType: 'material', label: 'Catálogo' },
     { id: 'Billetera', icon: 'credit-card', iconType: 'feather', label: 'Billetera' },
     { id: 'MiPerfil', icon: 'briefcase', iconType: 'feather', label: 'Mi Perfil' },
   ];
 
   return (
     <View style={navStyles.container}>
-      {navItems.map(item => {
+      {navItems.map((item) => {
         const isActive = active === item.id || active === item.label;
-        const color = isActive ? '#8B503E' : '#A0A0A0';
+        const color = isActive ? colors.primary : '#9A938C';
         return (
-          <TouchableOpacity key={item.id} style={navStyles.navItem} onPress={() => navigation.navigate(item.id)}>
-            {item.iconType === 'feather' ? (
-              <Feather name={item.icon} size={24} color={color} />
-            ) : (
-              <MaterialCommunityIcons name={item.icon} size={24} color={color} />
-            )}
+          <TouchableOpacity
+            key={item.id}
+            style={navStyles.navItem}
+            onPress={() => navigation.navigate(item.id)}
+          >
+            <View style={{ position: 'relative' }}>
+              {item.iconType === 'feather' ? (
+                <Feather name={item.icon} size={21} color={color} />
+              ) : (
+                <MaterialCommunityIcons name={item.icon} size={22} color={color} />
+              )}
+              {item.badge > 0 && (
+                <View style={navStyles.badgeDot}>
+                  <Text style={navStyles.badgeText}>{item.badge}</Text>
+                </View>
+              )}
+            </View>
             <Text style={[navStyles.navText, { color }]}>{item.label}</Text>
           </TouchableOpacity>
         );
       })}
     </View>
   );
-};
+}
 
 const navStyles = StyleSheet.create({
-  container: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', backgroundColor: '#FFF', paddingVertical: 10, borderTopWidth: 1, borderColor: '#EAEAEA' },
-  navItem: { alignItems: 'center' },
-  navText: { fontSize: 9, marginTop: 4, fontWeight: '600' }
+  container: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderColor: '#EFEAE4',
+  },
+  navItem: { alignItems: 'center', flex: 1 },
+  navText: { fontSize: 10, marginTop: 4, fontWeight: '700' },
+  badgeDot: {
+    position: 'absolute',
+    top: -5,
+    right: -10,
+    backgroundColor: '#C0392B',
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  badgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '900' },
 });
-// ESTILOS DE BILLETERA
+
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, backgroundColor: '#FFF', borderBottomWidth: 1, borderColor: colors.border },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: colors.textDark },
-  navRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  statusDropdown: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16 },
-  statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
-  statusText: { fontSize: 11, fontWeight: '600', color: colors.textDark, marginRight: 4 },
-  profileBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  scrollContainer: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 },
-  sectionTitle: { fontSize: 10, fontWeight: '700', color: colors.textGray, letterSpacing: 1 },
-  reportBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF0ED', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
-  reportBtnText: { fontSize: 10, fontWeight: '700', color: colors.primary, marginLeft: 4 },
-  balanceCard: { backgroundColor: colors.primary, borderRadius: 16, padding: 20, marginTop: 12, marginBottom: 20, elevation: 4, shadowColor: '#000', shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.2 },
-  balanceLabel: { fontSize: 12, color: '#FFF', opacity: 0.9 },
-  badgeReady: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
-  dotGreen: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#4CAF50', marginRight: 4 },
-  badgeReadyText: { fontSize: 10, color: '#FFF', fontWeight: '700' },
-  balanceAmount: { fontSize: 36, fontWeight: '800', color: '#FFF', marginBottom: 20 },
-  transferBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF', paddingVertical: 14, borderRadius: 12, marginBottom: 16 },
-  transferBtnText: { fontSize: 13, fontWeight: '700', color: colors.primary, marginLeft: 8 },
-  processingRow: { flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderColor: 'rgba(255,255,255,0.2)', paddingTop: 12 },
-  processingLabel: { fontSize: 11, color: '#FFF', opacity: 0.8 },
-  processingVal: { fontSize: 11, fontWeight: '700', color: '#FFF' },
-  timeFilters: { flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 12, padding: 4, marginBottom: 20, borderWidth: 1, borderColor: colors.border },
-  timeBtn: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8 },
-  timeBtnActive: { backgroundColor: '#F5F5F5' },
-  timeBtnText: { fontSize: 11, fontWeight: '600', color: colors.textGray },
-  timeBtnTextActive: { color: colors.textDark },
-  chartCard: { backgroundColor: '#FFF', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: colors.border, marginBottom: 20 },
-  chartSub: { fontSize: 9, fontWeight: '700', color: colors.textGray, letterSpacing: 1 },
-  chartTitle: { fontSize: 16, fontWeight: '800', color: colors.textDark, marginTop: 2 },
-  trendBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E8F5E9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
-  trendText: { fontSize: 11, fontWeight: '700', color: '#2E7D32', marginLeft: 4 },
-  barsContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', height: 120, paddingTop: 20 },
-  barCol: { alignItems: 'center' },
-  bar: { width: 30, backgroundColor: '#EAEAEA', borderRadius: 4, marginBottom: 8 },
-  barPeakActive: { backgroundColor: colors.accent },
-  barLabel: { fontSize: 10, color: colors.textGray },
-  barPeak: { fontSize: 10, fontWeight: '700', color: colors.primary, marginBottom: 4 },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 20 },
-  gridItem: { width: '48%', backgroundColor: '#FFF', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: colors.border },
-  gridTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  gridLabel: { fontSize: 9, fontWeight: '700', color: colors.textGray, letterSpacing: 0.5 },
-  gridVal: { fontSize: 16, fontWeight: '800', color: colors.textDark, marginBottom: 4 },
-  gridSub: { fontSize: 9, color: colors.textGray },
-  gridSubGreen: { fontSize: 9, fontWeight: '600', color: '#2E7D32' },
-  sectionDrag: { fontSize: 10, color: colors.primary, fontWeight: '600' },
-  bankCard: { backgroundColor: '#FFF', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: colors.border },
-  bankIcon: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#F9F1EF', alignItems: 'center', justifyContent: 'center' },
-  bankTitle: { fontSize: 14, fontWeight: '700', color: colors.textDark },
-  bankSub: { fontSize: 11, color: colors.textGray, marginTop: 2 },
-  stripeText: { fontSize: 9, fontWeight: '700', color: '#00897B' },
-  bankFooter: { flexDirection: 'row', alignItems: 'center', marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderColor: '#F5F5F5' },
-  bankFooterText: { fontSize: 10, color: colors.textDark, fontWeight: '500' },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+  },
+  headerTitle: { fontSize: 16, fontWeight: '900', color: colors.textDark },
+  statusPill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
+  scroll: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 36 },
+  balanceCard: {
+    backgroundColor: colors.secondary,
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 14,
+  },
+  balanceLabel: { fontSize: 10, fontWeight: '800', color: '#D48C70' },
+  balanceAmount: { fontSize: 30, fontWeight: '900', color: '#FFFFFF', marginVertical: 4 },
+  balanceRule: { fontSize: 11, color: '#D6CEC7' },
+  creditCardVisual: {
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
+    elevation: 5,
+  },
+  cardTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+  cardBrand: { fontSize: 10, fontWeight: '800', color: '#FDECE7', letterSpacing: 1 },
+  cardNumberPreview: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 2.2,
+    marginBottom: 18,
+  },
+  cardBottomRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  cardMiniLabel: { fontSize: 9, color: '#D48C70', fontWeight: '700' },
+  cardHolderPreview: { fontSize: 12, color: '#FFFFFF', fontWeight: '800', marginTop: 2 },
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 18,
+  },
+  cardTitle: { fontSize: 15, fontWeight: '800', color: colors.textDark, marginBottom: 12 },
+  fieldLabel: { fontSize: 11.5, fontWeight: '700', color: colors.textDark, marginBottom: 6 },
+  pillsRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  pill: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: '#F8F6F4',
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+  },
+  pillActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  pillText: { fontSize: 11.5, fontWeight: '700', color: colors.textDark },
+  input: {
+    backgroundColor: '#F8F6F4',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textDark,
+    marginBottom: 12,
+  },
+  inputWithIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8F6F4',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    height: 46,
+    marginBottom: 12,
+  },
+  inputInner: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: colors.textDark,
+  },
+  rechargeBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingVertical: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  rechargeBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.textGray,
+    marginBottom: 10,
+  },
+  txRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 8,
+  },
+  txDesc: { fontSize: 13, fontWeight: '700', color: colors.textDark },
+  txMeta: { fontSize: 11, color: colors.textGray, marginTop: 2 },
+  txAmount: { fontSize: 14, fontWeight: '800' },
 });

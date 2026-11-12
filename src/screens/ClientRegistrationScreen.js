@@ -1,173 +1,468 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, StatusBar } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Feather, Ionicons } from '@expo/vector-icons';
+/**
+ * Archivo: src/screens/ClientRegistrationScreen.js
+ * Registro de Cliente con selección de fotografía desde el dispositivo (expo-image-picker)
+ * y subida a Supabase Storage, sin campos de texto para pegar URLs y sin modales invasivos.
+ */
 
-const colors = { background: '#FAFAFA', surface: '#FFFFFF', primary: '#D89C8F', textDark: '#1E1E1E', textGray: '#707070', border: '#EAEAEA' };
+import React, { useState, useEffect } from 'react';
+import {
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
+  ScrollView,
+  TextInput,
+  StatusBar,
+  Image,
+  ActivityIndicator,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Feather } from '@expo/vector-icons';
+import {
+  colors,
+  sessionStore,
+  callBackendApi,
+  BARRIOS_DISPONIBLES,
+  seleccionarYSubirFotografiaDispositivo,
+  obtenerUbicacionExactaGPS,
+  useResponsiveLayout,
+} from '../theme/colors';
 
 export default function ClientRegistrationScreen({ navigation }) {
+  const layout = useResponsiveLayout();
+  const [nombre, setNombre] = useState('');
+  const [correo, setCorreo] = useState('');
+  const [telefono, setTelefono] = useState('');
+  const [barrio, setBarrio] = useState(BARRIOS_DISPONIBLES[0]);
+  const [direccion, setDireccion] = useState('');
+  const [password, setPassword] = useState('');
   const [verClave, setVerClave] = useState(false);
-  const [aceptaPromos, setAceptaPromos] = useState(true);
-  const [aceptaTerminos, setAceptaTerminos] = useState(false);
+
+  // Estado de fotografía seleccionada desde el dispositivo
+  const [fotoUrl, setFotoUrl] = useState(null);
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
+  const [progresoFoto, setProgresoFoto] = useState(0);
+
+  const [aceptaTerminos, setAceptaTerminos] = useState(true);
+  const [cargando, setCargando] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  useEffect(() => {
+    obtenerUbicacionExactaGPS('cliente').then((gps) => {
+      if (gps?.direccion && !direccion) setDireccion(gps.direccion);
+      if (gps?.barrio) setBarrio(gps.barrio);
+    });
+  }, []);
+
+  const handleSeleccionarFotoDispositivo = async () => {
+    setErrorMsg('');
+    setSubiendoFoto(true);
+    setProgresoFoto(10);
+    try {
+      const resultado = await seleccionarYSubirFotografiaDispositivo({
+        carpeta: 'clientes',
+        onProgress: (p) => setProgresoFoto(p),
+      });
+      if (resultado && resultado.urlPublica) {
+        setFotoUrl(resultado.urlPublica);
+      }
+    } catch (err) {
+      setErrorMsg(err.message || 'Error al seleccionar la fotografía desde el dispositivo.');
+    } finally {
+      setSubiendoFoto(false);
+    }
+  };
+
+  const handleEliminarFoto = () => {
+    setFotoUrl(null);
+    setProgresoFoto(0);
+  };
+
+  const handleRegistrarCliente = async () => {
+    if (!nombre.trim() || !correo.trim() || !telefono.trim() || !password.trim()) {
+      setErrorMsg('Completa tu nombre, correo electrónico, celular y contraseña.');
+      return;
+    }
+    if (!fotoUrl) {
+      setErrorMsg('Selecciona una fotografía de perfil desde tu dispositivo.');
+      return;
+    }
+    if (password.trim().length < 6) {
+      setErrorMsg('La contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+    if (!aceptaTerminos) {
+      setErrorMsg('Debes aceptar los Términos y Condiciones para continuar.');
+      return;
+    }
+
+    setCargando(true);
+    setErrorMsg('');
+
+    const telefonoFormateado = telefono.trim().startsWith('+')
+      ? telefono.trim()
+      : `+57${telefono.trim().replace(/\s+/g, '')}`;
+
+    try {
+      const resp = await callBackendApi('/auth/register/client', 'POST', {
+        nombre_completo: nombre.trim(),
+        correo: correo.trim().toLowerCase(),
+        password: password.trim(),
+        telefono: telefonoFormateado,
+        barrio,
+        direccion_principal: direccion.trim(),
+        foto_perfil_url: fotoUrl,
+      });
+
+      sessionStore.selectedRole = 'cliente';
+      sessionStore.isAuthenticated = true;
+      sessionStore.activeRoleSession = 'cliente';
+      sessionStore.token = resp?.token || `token-cliente-${Date.now()}`;
+      sessionStore.clientUser = {
+        ...sessionStore.clientUser,
+        id: resp?.usuario?.id || null,
+        nombre_completo: nombre.trim(),
+        correo: correo.trim().toLowerCase(),
+        telefono: telefonoFormateado,
+        barrio,
+        direccion_principal: direccion.trim(),
+        foto_perfil_url: fotoUrl,
+      };
+
+      navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+    } catch (err) {
+      setErrorMsg(err.message || 'Ocurrió un error al registrar tu cuenta.');
+    } finally {
+      setCargando(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-        
-        {/* Header con Píldora */}
+      <ScrollView
+        contentContainerStyle={[styles.scrollContainer, layout.contentContainerStyle]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Feather name="arrow-left" size={24} color={colors.textDark} />
+            <Feather name="arrow-left" size={20} color={colors.textDark} />
           </TouchableOpacity>
           <View style={styles.pill}>
-            <MaterialCommunityIcons name="flower-tulip-outline" size={14} color="#8B503E" />
-            <Text style={styles.pillText}>ALTA BELLEZA EXCLUSIVA</Text>
+            <Feather name="user-check" size={13} color={colors.primary} />
+            <Text style={styles.pillText}>REGISTRO DE CLIENTE</Text>
           </View>
           <View style={{ width: 40 }} />
         </View>
 
-        {/* Títulos */}
         <View style={styles.titleSection}>
-          <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 8}}>
-            <View style={{width: 6, height: 6, borderRadius: 3, backgroundColor: '#8B503E', marginRight: 6}} />
-            <Text style={styles.subHeading}>CONCIERGE PRIVADO</Text>
-          </View>
           <Text style={styles.heading}>Crea tu Cuenta de Cliente</Text>
-          <Text style={styles.description}>Accede a citas Flash exclusivas a domicilio o en salones selectos en menos de 60 minutos.</Text>
+          <Text style={styles.description}>
+            Completa tus datos reales y selecciona tu fotografía de perfil desde tu dispositivo.
+          </Text>
         </View>
 
-        {/* Botones Sociales */}
-        <TouchableOpacity style={styles.socialButtonGoogle}>
-          <Ionicons name="logo-google" size={18} color="#DB4437" />
-          <Text style={styles.socialTextGoogle}>Continuar con Google</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.socialButtonApple}>
-          <Ionicons name="logo-apple" size={18} color="#FFFFFF" />
-          <Text style={styles.socialTextApple}>Continuar con Apple</Text>
-        </TouchableOpacity>
+        {errorMsg ? (
+          <View style={styles.errorBox}>
+            <Feather name="alert-circle" size={16} color="#C0392B" />
+            <Text style={styles.errorText}>{errorMsg}</Text>
+          </View>
+        ) : null}
 
-        {/* Divisor */}
-        <View style={styles.dividerContainer}>
-          <View style={styles.line} />
-          <Text style={styles.dividerText}>O REGÍSTRATE CON TU CORREO</Text>
-          <View style={styles.line} />
+        {/* Selector de Fotografía desde el Dispositivo */}
+        <View style={styles.photoCard}>
+          {fotoUrl ? (
+            <Image source={{ uri: fotoUrl }} style={styles.avatarImg} />
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <Feather name="image" size={26} color={colors.textGray} />
+            </View>
+          )}
+          <View style={{ flex: 1, marginLeft: 14 }}>
+            <Text style={styles.photoTitle}>Fotografía de perfil *</Text>
+            <Text style={styles.photoSub}>
+              {subiendoFoto
+                ? `Subiendo al almacenamiento (${progresoFoto}%)...`
+                : fotoUrl
+                ? 'Fotografía cargada desde tu dispositivo'
+                : 'Selecciona una imagen desde la galería de tu teléfono'}
+            </Text>
+
+            {subiendoFoto && (
+              <View style={styles.progressBarBg}>
+                <View style={[styles.progressBarFill, { width: `${progresoFoto}%` }]} />
+              </View>
+            )}
+
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+              <TouchableOpacity
+                style={styles.changePhotoBtn}
+                onPress={handleSeleccionarFotoDispositivo}
+                disabled={subiendoFoto}
+              >
+                <Feather name="upload" size={13} color={colors.primary} />
+                <Text style={styles.changePhotoText}>
+                  {fotoUrl ? 'Cambiar fotografía' : 'Seleccionar del dispositivo'}
+                </Text>
+              </TouchableOpacity>
+
+              {fotoUrl && !subiendoFoto && (
+                <TouchableOpacity style={styles.removePhotoBtn} onPress={handleEliminarFoto}>
+                  <Feather name="trash-2" size={13} color="#C0392B" />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
         </View>
 
-        {/* Formulario */}
-        <Text style={styles.label}>Nombre y Apellidos</Text>
+        <Text style={styles.label}>Nombre y Apellidos *</Text>
         <View style={styles.inputContainer}>
           <Feather name="user" size={18} color={colors.textGray} style={styles.inputIcon} />
-          <TextInput style={styles.input} placeholder="ej. Valentina Rossi" placeholderTextColor="#A0A0A0" />
+          <TextInput
+            style={styles.input}
+            value={nombre}
+            onChangeText={setNombre}
+            placeholder="Ingresa tu nombre completo"
+            placeholderTextColor="#A0A0A0"
+          />
         </View>
 
-        <Text style={styles.label}>Correo Electrónico</Text>
+        <Text style={styles.label}>Correo Electrónico *</Text>
         <View style={styles.inputContainer}>
           <Feather name="mail" size={18} color={colors.textGray} style={styles.inputIcon} />
-          <TextInput style={styles.input} placeholder="ej. valentina@beauty.com" placeholderTextColor="#A0A0A0" keyboardType="email-address" />
+          <TextInput
+            style={styles.input}
+            value={correo}
+            onChangeText={setCorreo}
+            placeholder="correo@ejemplo.com"
+            placeholderTextColor="#A0A0A0"
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
         </View>
 
-        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end'}}>
-           <Text style={styles.label}>Teléfono Móvil</Text>
-           <Text style={{fontSize: 10, color: '#8B503E', marginBottom: 8}}>Verificación instantánea</Text>
+        <Text style={styles.label}>Teléfono Celular (+57) *</Text>
+        <View style={styles.inputContainer}>
+          <Feather name="phone" size={18} color={colors.textGray} style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            value={telefono}
+            onChangeText={setTelefono}
+            placeholder="300 000 0000"
+            keyboardType="phone-pad"
+            placeholderTextColor="#A0A0A0"
+          />
         </View>
-        <View style={{flexDirection: 'row', gap: 10, marginBottom: 4}}>
-          <View style={[styles.inputContainer, {flex: 0.35, marginBottom: 0, paddingHorizontal: 12}]}>
-            <Text style={{color: colors.textDark, fontWeight: '500'}}>ES +34 <Feather name="chevron-down" size={14}/></Text>
-          </View>
-          <View style={[styles.inputContainer, {flex: 0.65, marginBottom: 0}]}>
-            <Feather name="phone" size={16} color={colors.textGray} style={styles.inputIcon} />
-            <TextInput style={styles.input} placeholder="612 345 678" keyboardType="phone-pad" placeholderTextColor="#A0A0A0" />
-          </View>
-        </View>
-        <Text style={{fontSize: 11, color: colors.textGray, marginBottom: 16}}>ⓘ Para avisos de llegada de tu especialista</Text>
 
-        <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
-          <Text style={styles.label}>Contraseña de acceso</Text>
-          <Text style={{fontSize: 10, color: colors.textGray}}>Mínimo 8 caracteres</Text>
+        <Text style={styles.label}>Zona / Barrio *</Text>
+        <View style={styles.pillsRow}>
+          {BARRIOS_DISPONIBLES.map((b) => (
+            <TouchableOpacity
+              key={b}
+              style={[styles.barrioChip, barrio === b && styles.barrioChipActive]}
+              onPress={() => setBarrio(b)}
+            >
+              <Text style={[styles.barrioChipText, barrio === b && { color: '#FFFFFF' }]}>
+                {b}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
+
+        <Text style={styles.label}>Dirección principal para servicios a domicilio *</Text>
+        <View style={styles.inputContainer}>
+          <Feather name="map-pin" size={18} color={colors.textGray} style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            value={direccion}
+            onChangeText={setDireccion}
+            placeholder="Ingresa tu dirección exacta"
+            placeholderTextColor="#A0A0A0"
+          />
+        </View>
+
+        <Text style={styles.label}>Contraseña de acceso *</Text>
         <View style={styles.inputContainer}>
           <Feather name="lock" size={18} color={colors.textGray} style={styles.inputIcon} />
-          <TextInput style={styles.input} placeholder="••••••••" placeholderTextColor="#A0A0A0" secureTextEntry={!verClave} />
-          <TouchableOpacity onPress={() => setVerClave(!verClave)} style={{padding: 5}}>
-            <Feather name={verClave ? "eye-off" : "eye"} size={18} color={colors.textGray} />
+          <TextInput
+            style={styles.input}
+            value={password}
+            onChangeText={setPassword}
+            placeholder="Mínimo 6 caracteres"
+            placeholderTextColor="#A0A0A0"
+            secureTextEntry={!verClave}
+          />
+          <TouchableOpacity onPress={() => setVerClave(!verClave)} style={{ padding: 5 }}>
+            <Feather name={verClave ? 'eye-off' : 'eye'} size={18} color={colors.textGray} />
           </TouchableOpacity>
         </View>
-        {/* Nivel Seguro Bar */}
-        <View style={{flexDirection: 'row', gap: 4, marginBottom: 20}}>
-          <View style={{flex: 1, height: 4, backgroundColor: '#D89C8F', borderRadius: 2}} />
-          <View style={{flex: 1, height: 4, backgroundColor: '#D89C8F', borderRadius: 2}} />
-          <View style={{flex: 1, height: 4, backgroundColor: '#EAEAEA', borderRadius: 2}} />
-          <Text style={{fontSize: 10, color: '#707070', marginLeft: 8, marginTop: -4}}>Nivel seguro</Text>
-        </View>
 
-        {/* Checkboxes */}
-        <TouchableOpacity style={styles.checkboxRow} onPress={() => setAceptaPromos(!aceptaPromos)}>
-          <View style={[styles.checkbox, aceptaPromos && styles.checkboxActive]} />
-          <Text style={styles.checkboxLabel}>Deseo recibir promociones exclusivas y créditos de bienvenida</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.checkboxRow} onPress={() => setAceptaTerminos(!aceptaTerminos)}>
-          <View style={[styles.checkbox, aceptaTerminos && styles.checkboxActive]} />
-          <Text style={styles.checkboxLabel}>Acepto los <Text style={styles.linkText}>Términos y Condiciones</Text> y la <Text style={styles.linkText}>Política de Privacidad</Text> de BeautyFlash</Text>
-        </TouchableOpacity>
-
-        {/* Botón Principal */}
-        <TouchableOpacity style={styles.mainButton}>
-          <Text style={styles.mainButtonText}>Crear Mi Cuenta VIP</Text>
-          <Feather name="arrow-right" size={18} color="#FFF" style={{marginLeft: 8}} />
-        </TouchableOpacity>
-
-        {/* Footer */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>
-            ¿Ya tienes una cuenta registrada? <Text style={styles.footerHighlight} onPress={() => navigation.navigate('Login')}>Inicia Sesión</Text>
-          </Text>
-          <View style={styles.secureBadge}>
-            <Feather name="lock" size={12} color="#707070" />
-            <Text style={styles.secureBadgeText}>Conexión cifrada de 256 bits · Privacidad garantizada</Text>
+        <TouchableOpacity
+          style={styles.checkboxRow}
+          onPress={() => setAceptaTerminos(!aceptaTerminos)}
+        >
+          <View style={[styles.checkbox, aceptaTerminos && styles.checkboxActive]}>
+            {aceptaTerminos && <Feather name="check" size={12} color="#FFFFFF" />}
           </View>
-        </View>
+          <Text style={styles.checkboxLabel}>
+            Acepto los Términos y Condiciones y la Política de Privacidad.
+          </Text>
+        </TouchableOpacity>
 
+        <TouchableOpacity
+          style={styles.mainButton}
+          onPress={handleRegistrarCliente}
+          disabled={cargando}
+        >
+          {cargando ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <>
+              <Text style={styles.mainButtonText}>Crear Cuenta de Cliente</Text>
+              <Feather name="arrow-right" size={18} color="#FFF" style={{ marginLeft: 8 }} />
+            </>
+          )}
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-// Asegúrate de importar MaterialCommunityIcons de @expo/vector-icons arriba
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#FAFAFA' },
-  scrollContainer: { paddingHorizontal: 20, paddingBottom: 40 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, marginBottom: 20 },
-  backButton: { width: 40, height: 40, justifyContent: 'center' },
-  pill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF0ED', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-  pillText: { fontSize: 10, fontWeight: '700', color: '#8B503E', marginLeft: 4, letterSpacing: 0.5 },
-  titleSection: { marginBottom: 24 },
-  subHeading: { fontSize: 10, fontWeight: '700', color: '#8B503E', letterSpacing: 1 },
-  heading: { fontSize: 26, fontWeight: '800', color: '#1E1E1E', marginBottom: 12 },
-  description: { fontSize: 14, color: '#707070', lineHeight: 22 },
-  socialButtonGoogle: { flexDirection: 'row', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#EAEAEA', borderRadius: 12, paddingVertical: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 12, elevation: 1 },
-  socialTextGoogle: { fontSize: 14, fontWeight: '600', color: '#1E1E1E', marginLeft: 8 },
-  socialButtonApple: { flexDirection: 'row', backgroundColor: '#1E1E1E', borderRadius: 12, paddingVertical: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
-  socialTextApple: { fontSize: 14, fontWeight: '600', color: '#FFFFFF', marginLeft: 8 },
-  dividerContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
-  line: { flex: 1, height: 1, backgroundColor: '#EAEAEA' },
-  dividerText: { fontSize: 11, fontWeight: '600', color: '#A0A0A0', paddingHorizontal: 12 },
-  label: { fontSize: 12, fontWeight: '600', color: '#1E1E1E', marginBottom: 8 },
-  inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#EAEAEA', borderRadius: 10, paddingHorizontal: 12, height: 50, marginBottom: 16 },
+  safeArea: { flex: 1, backgroundColor: colors.background },
+  scrollContainer: { paddingTop: 16, paddingBottom: 40 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#F3EFEA',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  pillText: { fontSize: 10, fontWeight: '700', color: colors.primary },
+  titleSection: { marginBottom: 18 },
+  heading: { fontSize: 24, fontWeight: '800', color: colors.textDark, marginBottom: 6 },
+  description: { fontSize: 13.5, color: colors.textGray, lineHeight: 20 },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FDEDEC',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 14,
+  },
+  errorText: { flex: 1, fontSize: 12.5, color: '#C0392B', fontWeight: '600' },
+  photoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 16,
+  },
+  avatarImg: { width: 68, height: 68, borderRadius: 34 },
+  avatarPlaceholder: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#F3EFEA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  photoTitle: { fontSize: 13.5, fontWeight: '700', color: colors.textDark },
+  photoSub: { fontSize: 11.5, color: colors.textGray, marginTop: 2 },
+  progressBarBg: {
+    width: '100%',
+    height: 5,
+    backgroundColor: '#EAE4DC',
+    borderRadius: 3,
+    marginTop: 6,
+    overflow: 'hidden',
+  },
+  progressBarFill: { height: '100%', backgroundColor: colors.primary },
+  changePhotoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#F6EFEB',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 10,
+  },
+  changePhotoText: { fontSize: 12, fontWeight: '700', color: colors.primary },
+  removePhotoBtn: {
+    backgroundColor: '#FDEDEC',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  label: { fontSize: 12, fontWeight: '700', color: colors.textDark, marginBottom: 6 },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 48,
+    marginBottom: 14,
+  },
   inputIcon: { marginRight: 10 },
-  input: { flex: 1, fontSize: 14, color: '#1E1E1E' },
-  checkboxRow: { flexDirection: 'row', marginBottom: 16, paddingRight: 20 },
-  checkbox: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#EAEAEA', marginRight: 12, alignItems: 'center', justifyContent: 'center' },
-  checkboxActive: { backgroundColor: '#8B503E' },
-  checkboxLabel: { fontSize: 12, color: '#707070', flex: 1, lineHeight: 18 },
-  linkText: { color: '#8B503E', textDecorationLine: 'underline' },
-  mainButton: { backgroundColor: '#D89C8F', flexDirection: 'row', borderRadius: 12, paddingVertical: 16, alignItems: 'center', justifyContent: 'center', marginVertical: 20 },
-  mainButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
-  footer: { alignItems: 'center' },
-  footerText: { fontSize: 14, color: '#707070', marginBottom: 16 },
-  footerHighlight: { color: '#8B503E', fontWeight: '700' },
-  secureBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
-  secureBadgeText: { fontSize: 10, color: '#707070', marginLeft: 6 },
+  input: { flex: 1, fontSize: 14, color: colors.textDark },
+  pillsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
+  barrioChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  barrioChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  barrioChipText: { fontSize: 12, fontWeight: '700', color: colors.textDark },
+  checkboxRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  checkboxActive: { backgroundColor: colors.primary },
+  checkboxLabel: { flex: 1, fontSize: 12.5, color: colors.textGray },
+  mainButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingVertical: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mainButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
 });

@@ -1,286 +1,650 @@
-import React from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, StatusBar } from 'react-native';
+/**
+ * Archivo: src/screens/ProDashboardScreen.js
+ * Panel del Profesional:
+ * - Paso 2 y 3 del flujo: Recibe la solicitud en `pendiente_aceptacion_profesional` y decide
+ *   Aceptar o Rechazar. Al aceptar, queda pendiente de la confirmación definitiva del cliente.
+ * - Paso 5: Cuando el cliente confirma un servicio a domicilio (`confirmada_por_cliente`,
+ *   `en_camino`, `en_servicio`), la vista se transforma en un MAPA DE GOOGLE A PANTALLA COMPLETA
+ *   con paneles flotantes compactos (foto y nombre del cliente, dirección, distancia y ETA,
+ *   acceso directo al chat, botón para llamar y acciones del servicio).
+ */
+
+import React, { useState, useEffect } from 'react';
+import {
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
+  ScrollView,
+  StatusBar,
+  Image,
+  Linking,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
+import { WebView } from 'react-native-webview';
+import {
+  colors,
+  sessionStore,
+  formatCOP,
+  ESTADOS_SOLICITUD_OFICIALES,
+  formatearEtiquetaEstado,
+  obtenerSolicitudActiva,
+  responderSolicitudPorProfesional,
+  actualizarEstadoSolicitudActiva,
+  generarHtmlMapaUber,
+  obtenerUbicacionExactaGPS,
+  sincronizarEstadoDesdeSupabase,
+  marcarNotificacionesComoLeidas,
+  useResponsiveLayout,
+} from '../theme/colors';
+import { ProBottomNav } from './BilleteraScreen';
+import { ChatServicioModal } from '../components/ServiceBookingModal';
 
-const colors = { background: '#FAFAFA', surface: '#FFFFFF', primary: '#8B503E', textDark: '#1E1E1E', textGray: '#707070', border: '#EAEAEA', accent: '#D89C8F' };
+export default function ProDashboardScreen({ navigation }) {
+  const layout = useResponsiveLayout();
+  const pro = sessionStore.proUser;
+  const [saldo, setSaldo] = useState(sessionStore.wallet.saldo_disponible_cop);
+  const [solicitud, setSolicitud] = useState(obtenerSolicitudActiva());
+  const [notificaciones, setNotificaciones] = useState([...sessionStore.notificacionesProfesional]);
+  const [verNotificaciones, setVerNotificaciones] = useState(false);
+  const [chatVisible, setChatVisible] = useState(false);
 
-export default function ProDashboardScreen() {
+  const refrescar = () => {
+    setSaldo(sessionStore.wallet.saldo_disponible_cop);
+    const act = obtenerSolicitudActiva();
+    setSolicitud(act ? { ...act } : null);
+    setNotificaciones([...sessionStore.notificacionesProfesional]);
+  };
+
+  useEffect(() => {
+    obtenerUbicacionExactaGPS('profesional').then(refrescar);
+    sincronizarEstadoDesdeSupabase('profesional').then(refrescar);
+    const interval = setInterval(async () => {
+      await sincronizarEstadoDesdeSupabase('profesional');
+      refrescar();
+    }, 2500);
+    const unsub = navigation.addListener('focus', () => {
+      sincronizarEstadoDesdeSupabase('profesional').then(refrescar);
+    });
+    return () => {
+      clearInterval(interval);
+      unsub();
+    };
+  }, [navigation]);
+
+  const toggleBandejaNotificaciones = async () => {
+    const nuevoEstado = !verNotificaciones;
+    setVerNotificaciones(nuevoEstado);
+    if (nuevoEstado) {
+      await marcarNotificacionesComoLeidas('profesional');
+      setNotificaciones([...sessionStore.notificacionesProfesional]);
+    }
+  };
+
+  const noLeidas = notificaciones.filter((n) => !n.leida).length;
+
+  // Determinar si debe activarse la experiencia de MAPA A PANTALLA COMPLETA
+  const esDomicilioConfirmado =
+    solicitud &&
+    solicitud.modalidad === 'domicilio' &&
+    [
+      ESTADOS_SOLICITUD_OFICIALES.CONFIRMADA_POR_CLIENTE,
+      ESTADOS_SOLICITUD_OFICIALES.EN_CAMINO,
+      ESTADOS_SOLICITUD_OFICIALES.EN_SERVICIO,
+    ].includes(solicitud.estado);
+
+  // EXPERIENCIA DE MAPA A PANTALLA COMPLETA PARA SERVICIOS A DOMICILIO CONFIRMADOS
+  if (esDomicilioConfirmado) {
+    return (
+      <SafeAreaView style={styles.fullScreenContainer}>
+        <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+
+        {/* Mapa de Google ocupando toda la pantalla disponible */}
+        <View style={styles.fullScreenMapArea}>
+          <WebView
+            key={`pro-fullmap-${solicitud.codigo_reserva}-${solicitud.estado}-${solicitud.progreso_ruta}`}
+            originWhitelist={['*']}
+            source={{
+              html: generarHtmlMapaUber({
+                solicitud,
+                vista: 'profesional',
+              }),
+            }}
+            style={{ flex: 1 }}
+            javaScriptEnabled
+            domStorageEnabled
+          />
+
+          {/* Panel Flotante Superior: Estado, Distancia y Tiempo Estimado */}
+          <View style={styles.floatingTopBar}>
+            <View style={styles.statusDot} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.floatingStatusLabel}>
+                {formatearEtiquetaEstado(solicitud.estado).toUpperCase()}
+              </Text>
+              <Text style={styles.floatingEtaText}>
+                Distancia: {solicitud.distancia_estimada_km ?? 1.2} km • Tiempo estimado:{' '}
+                {solicitud.tiempo_estimado_minutos ?? 5} min
+              </Text>
+            </View>
+          </View>
+
+          {/* Panel Flotante Inferior Compacto: Información del Cliente, Chat, Llamada y Acciones */}
+          <View style={styles.floatingBottomCard}>
+            <View style={styles.clientRow}>
+              {solicitud.cliente_foto ? (
+                <Image source={{ uri: solicitud.cliente_foto }} style={styles.clientAvatar} />
+              ) : (
+                <View style={styles.clientAvatarPlaceholder}>
+                  <Feather name="user" size={20} color={colors.primary} />
+                </View>
+              )}
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.clientName}>{solicitud.cliente_nombre}</Text>
+                <Text style={styles.serviceSub}>{solicitud.servicio_nombre}</Text>
+                <View style={styles.addrRow}>
+                  <Feather name="map-pin" size={12} color={colors.primary} />
+                  <Text style={styles.addrText} numberOfLines={1}>
+                    {solicitud.direccion_servicio}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Botones compactos de Chat y Llamada */}
+              <View style={styles.commButtonsRow}>
+                <TouchableOpacity
+                  style={styles.iconCircleBtn}
+                  onPress={() => setChatVisible(true)}
+                >
+                  <Feather name="message-square" size={18} color={colors.primary} />
+                </TouchableOpacity>
+                {solicitud.cliente_telefono ? (
+                  <TouchableOpacity
+                    style={styles.iconCircleBtn}
+                    onPress={() => Linking.openURL(`tel:${solicitud.cliente_telefono}`)}
+                  >
+                    <Feather name="phone" size={18} color={colors.primary} />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </View>
+
+            {/* Acciones del servicio según el estado */}
+            <View style={styles.actionsRow}>
+              {solicitud.estado === ESTADOS_SOLICITUD_OFICIALES.CONFIRMADA_POR_CLIENTE && (
+                <TouchableOpacity
+                  style={styles.primaryActionBtn}
+                  onPress={async () => {
+                    await actualizarEstadoSolicitudActiva(
+                      ESTADOS_SOLICITUD_OFICIALES.EN_CAMINO,
+                      35
+                    );
+                    refrescar();
+                  }}
+                >
+                  <Feather name="navigation" size={16} color="#FFFFFF" />
+                  <Text style={styles.primaryActionText}>Iniciar Ruta (En camino)</Text>
+                </TouchableOpacity>
+              )}
+
+              {solicitud.estado === ESTADOS_SOLICITUD_OFICIALES.EN_CAMINO && (
+                <View style={{ flexDirection: 'row', gap: 8, width: '100%' }}>
+                  <TouchableOpacity
+                    style={[styles.secondaryActionBtn, { flex: 1 }]}
+                    onPress={async () => {
+                      await actualizarEstadoSolicitudActiva(
+                        ESTADOS_SOLICITUD_OFICIALES.EN_CAMINO,
+                        Math.min(92, (solicitud.progreso_ruta || 35) + 30)
+                      );
+                      refrescar();
+                    }}
+                  >
+                    <Text style={styles.secondaryActionText}>Actualizar ubicación</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.primaryActionBtn, { flex: 1.3 }]}
+                    onPress={async () => {
+                      await actualizarEstadoSolicitudActiva(
+                        ESTADOS_SOLICITUD_OFICIALES.EN_SERVICIO,
+                        100
+                      );
+                      refrescar();
+                    }}
+                  >
+                    <Feather name="scissors" size={15} color="#FFFFFF" />
+                    <Text style={styles.primaryActionText}>Iniciar Servicio</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {solicitud.estado === ESTADOS_SOLICITUD_OFICIALES.EN_SERVICIO && (
+                <TouchableOpacity
+                  style={[styles.primaryActionBtn, { backgroundColor: '#1E824C' }]}
+                  onPress={async () => {
+                    await actualizarEstadoSolicitudActiva(
+                      ESTADOS_SOLICITUD_OFICIALES.FINALIZADA,
+                      100
+                    );
+                    refrescar();
+                  }}
+                >
+                  <Feather name="check-circle" size={16} color="#FFFFFF" />
+                  <Text style={styles.primaryActionText}>Finalizar Servicio</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </View>
+
+        <ChatServicioModal
+          visible={chatVisible}
+          solicitud={solicitud}
+          rolActual="profesional"
+          onClose={() => {
+            setChatVisible(false);
+            refrescar();
+          }}
+        />
+
+        <ProBottomNav navigation={navigation} active="ProDashboard" />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
-      
-      {/* Top Navigation / Header */}
+
       <View style={styles.topNav}>
-        <View style={{flexDirection: 'row', alignItems: 'center'}}>
-          <View style={styles.greenDot} />
-          <Text style={styles.dashboardTitle}>Dashboard</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.dashboardTitle}>Panel Profesional</Text>
+          <Text style={styles.proSubtitle}>
+            {pro.nombre_completo || 'Profesional'} {pro.barrio ? `• ${pro.barrio}` : ''}
+          </Text>
         </View>
-        <View style={styles.navRight}>
-          <TouchableOpacity style={styles.statusDropdown}>
-            <View style={[styles.greenDot, {marginRight: 6}]} />
-            <Text style={styles.statusText}>Disponible</Text>
-            <Feather name="chevron-down" size={14} color={colors.textGray} />
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <TouchableOpacity style={styles.bellBtn} onPress={toggleBandejaNotificaciones}>
+            <Feather name="bell" size={18} color={colors.textDark} />
+            {noLeidas > 0 && (
+              <View style={styles.bellBadge}>
+                <Text style={styles.bellBadgeText}>{noLeidas}</Text>
+              </View>
+            )}
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn}><Feather name="bell" size={20} color={colors.textDark} /></TouchableOpacity>
-          <TouchableOpacity style={styles.profileBtn}><Feather name="user" size={16} color="#FFF" /></TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.walletBadge}
+            onPress={() => navigation.navigate('Billetera')}
+          >
+            <Feather name="credit-card" size={13} color="#FFFFFF" />
+            <Text style={styles.walletBadgeText}>{formatCOP(saldo)}</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-        
-        {/* Saludo */}
-        <View style={styles.greetingRow}>
-          <View style={{flex: 1}}>
-            <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 4}}>
-              <Text style={styles.atelierStatus}>ATELIER ACTIVO</Text>
-              <View style={styles.nuevoBadge}><Text style={styles.nuevoBadgeText}>Nuevo</Text></View>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, layout.contentContainerStyle]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Panel desplegable en línea de Notificaciones (sin modales invasivos) */}
+        {verNotificaciones && (
+          <View style={styles.inlineNotifPanel}>
+            <View style={styles.inlineNotifHeader}>
+              <Text style={styles.inlineNotifTitle}>
+                Historial de Notificaciones ({notificaciones.length})
+              </Text>
+              <TouchableOpacity onPress={() => setVerNotificaciones(false)}>
+                <Feather name="x" size={18} color={colors.textGray} />
+              </TouchableOpacity>
             </View>
-            <Text style={styles.greetingTitle}>¡Hola, Sofía!</Text>
-            <Text style={styles.greetingSub}>Tu espacio estético está listo para recibir clientes.</Text>
+            {notificaciones.length === 0 ? (
+              <Text style={styles.emptyNotifText}>No hay notificaciones nuevas.</Text>
+            ) : (
+              notificaciones.map((n) => (
+                <View key={n.id} style={styles.notifItem}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={styles.notifTitle}>{n.titulo}</Text>
+                    <Text style={styles.notifTime}>{n.hora}</Text>
+                  </View>
+                  <Text style={styles.notifMsg}>{n.mensaje}</Text>
+                </View>
+              ))
+            )}
           </View>
-          <View style={styles.liveBadge}>
-            <View style={styles.greenDot} />
-            <View style={{marginLeft: 6}}>
-              <Text style={styles.liveTitle}>En Vivo</Text>
-              <Text style={styles.liveSub}>Aceptando citas</Text>
-            </View>
-          </View>
-        </View>
+        )}
 
-        {/* Tarjeta de Progreso / Onboarding */}
-        <View style={styles.onboardingCard}>
-          <View style={styles.onboardingHeader}>
-            <View style={{flexDirection: 'row', alignItems: 'center'}}>
-              <MaterialCommunityIcons name="star-four-points" size={18} color={colors.primary} />
-              <Text style={styles.onboardingTitle}> Tu Atelier ya está visible</Text>
-            </View>
-            <View style={styles.progressCircle}><Text style={styles.progressCircleText}>1/3{'\n'}listos</Text></View>
-          </View>
-          <Text style={styles.onboardingSub}>Completa estos pasos para recibir tu primera cita hoy:</Text>
-          <View style={styles.progressBar}><View style={[styles.progressFill, {width: '33%'}]} /></View>
+        <Text style={styles.sectionTitle}>SOLICITUDES DE SERVICIO</Text>
 
-          {/* Tareas */}
-          <View style={styles.taskCardActive}>
-            <View style={styles.taskHeader}>
-              <Feather name="share-2" size={16} color={colors.primary} style={{marginTop: 2}}/>
-              <View style={{flex: 1, marginLeft: 12}}>
-                <Text style={styles.taskTitle}>Compartir enlace en Instagram</Text>
-                <Text style={styles.taskSub}>beautyflash.pro/@sofia.atelier</Text>
+        {!solicitud ? (
+          <View style={styles.emptyCard}>
+            <Feather name="inbox" size={28} color={colors.textGray} />
+            <Text style={styles.emptyTitle}>No tienes solicitudes pendientes.</Text>
+            <Text style={styles.emptySub}>
+              Cuando un cliente solicite uno de tus servicios activos, aparecerá aquí en tiempo real.
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.reqCard}>
+            <View style={styles.reqTop}>
+              <Text style={styles.reqBadge}>
+                {solicitud.modalidad === 'domicilio' ? 'A DOMICILIO' : 'EN SALÓN'} • #
+                {solicitud.codigo_reserva}
+              </Text>
+              <Text style={styles.reqState}>
+                {formatearEtiquetaEstado(solicitud.estado).toUpperCase()}
+              </Text>
+            </View>
+
+            <Text style={styles.reqTitle}>{solicitud.servicio_nombre}</Text>
+            <Text style={styles.reqMeta}>
+              Cliente: {solicitud.cliente_nombre} • Valor: {formatCOP(solicitud.precio_total_cop)} COP
+            </Text>
+            <View style={styles.addrRow}>
+              <Feather name="map-pin" size={13} color={colors.textGray} />
+              <Text style={styles.reqAddr}>{solicitud.direccion_servicio}</Text>
+            </View>
+
+            {/* PASO 3: El profesional acepta o rechaza la solicitud */}
+            {solicitud.estado === ESTADOS_SOLICITUD_OFICIALES.PENDIENTE_ACEPTACION_PRO && (
+              <View style={styles.decisionRow}>
+                <TouchableOpacity
+                  style={styles.rejectBtn}
+                  onPress={async () => {
+                    await responderSolicitudPorProfesional('rechazar');
+                    refrescar();
+                  }}
+                >
+                  <Feather name="x-circle" size={16} color="#C0392B" />
+                  <Text style={styles.rejectBtnText}>Rechazar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.acceptBtn}
+                  onPress={async () => {
+                    await responderSolicitudPorProfesional('aceptar');
+                    refrescar();
+                  }}
+                >
+                  <Feather name="check-circle" size={16} color="#FFFFFF" />
+                  <Text style={styles.acceptBtnText}>Aceptar Solicitud</Text>
+                </TouchableOpacity>
               </View>
-              <View style={styles.circleOutline} />
-            </View>
-            <TouchableOpacity style={styles.copyBtn}>
-              <Feather name="copy" size={14} color={colors.textDark} />
-              <Text style={styles.copyBtnText}>Copiar enlace público</Text>
+            )}
+
+            {/* Estado intermedio: Aceptada por el profesional, esperando que el CLIENTE confirme definitivamente */}
+            {(solicitud.estado === ESTADOS_SOLICITUD_OFICIALES.ACEPTADA_POR_PRO ||
+              solicitud.estado === ESTADOS_SOLICITUD_OFICIALES.PENDIENTE_CONFIRMACION_CLIENTE) && (
+              <View style={styles.pendingClientBox}>
+                <Feather name="clock" size={16} color={colors.primary} />
+                <Text style={styles.pendingClientText}>
+                  Has aceptado la solicitud. Esperando a que el cliente confirme definitivamente el servicio para activarlo.
+                </Text>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={styles.openChatBtn}
+              onPress={() => setChatVisible(true)}
+            >
+              <Feather name="message-square" size={15} color={colors.textDark} />
+              <Text style={styles.openChatBtnText}>
+                Abrir conversación con el cliente ({(solicitud.mensajes_chat || []).length})
+              </Text>
             </TouchableOpacity>
           </View>
-
-          <View style={styles.taskCard}>
-            <Feather name="zap" size={18} color={colors.textDark} />
-            <View style={{flex: 1, marginLeft: 12}}>
-              <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                <Text style={styles.taskTitle}>Modo Flash N...</Text>
-                <View style={styles.incomeBadge}><Text style={styles.incomeBadgeText}>+25% ingresos</Text></View>
-              </View>
-              <Text style={styles.taskSub}>Citas urgentes en {'<'} 60 min</Text>
-            </View>
-            <TouchableOpacity style={styles.activateBtn}><Text style={styles.activateBtnText}>Activar</Text></TouchableOpacity>
-          </View>
-
-          <View style={styles.taskCard}>
-            <Feather name="image" size={18} color={colors.textDark} />
-            <View style={{flex: 1, marginLeft: 12}}>
-              <Text style={styles.taskTitle}>Añadir fotos al catálogo</Text>
-              <Text style={styles.taskSub}>Muestra tus últimos tratamientos</Text>
-            </View>
-            <TouchableOpacity style={styles.plusBtn}><Feather name="plus" size={16} color={colors.textDark} /></TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Métricas del Día */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Tu Día en Flash</Text>
-          <Text style={styles.sectionSub}>Hoy, 24 Oct</Text>
-        </View>
-        <View style={styles.metricsRow}>
-          <View style={styles.metricCard}>
-            <View style={styles.metricTop}>
-              <Text style={styles.metricLabel}>Ganancias</Text>
-              <Feather name="dollar-sign" size={12} color={colors.textDark} />
-            </View>
-            <Text style={styles.metricValue}>0,00 €</Text>
-            <Text style={styles.metricSubGreen}>Flash Inmediata</Text>
-          </View>
-          <View style={styles.metricCard}>
-            <View style={styles.metricTop}>
-              <Text style={styles.metricLabel}>Citas hoy</Text>
-              <Feather name="calendar" size={12} color={colors.textDark} />
-            </View>
-            <Text style={styles.metricValue}>0</Text>
-            <Text style={styles.metricSub}>09:30 - 14:00 lib...</Text>
-          </View>
-          <View style={styles.metricCard}>
-            <View style={styles.metricTop}>
-              <Text style={styles.metricLabel}>Explorando</Text>
-              <Feather name="eye" size={12} color={colors.textDark} />
-            </View>
-            <Text style={styles.metricValue}>14<View style={styles.greenDot}/></Text>
-            <Text style={styles.metricSub}>Clientes VIP</Text>
-          </View>
-        </View>
-
-        {/* Próximas Solicitudes (Empty State) */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Próximas Solicitudes</Text>
-          <Text style={styles.sectionSubOrange}>Tiempo Real</Text>
-        </View>
-        <View style={styles.emptyStateCard}>
-          <View style={styles.emptyIconCircle}>
-            <Feather name="monitor" size={24} color={colors.textDark} /> 
-            {/* Usando monitor como placeholder para el icono de silla/salón */}
-          </View>
-          <Text style={styles.emptyTitle}>Esperando tu primera reserva</Text>
-          <Text style={styles.emptyDesc}>Los clientes de <Text style={{fontWeight: '700', color: colors.textDark}}>Madrid Centro</Text> pueden descubrir y agendar tus servicios en este mismo instante.</Text>
-          <View style={styles.radarPill}>
-            <Feather name="navigation" size={12} color={colors.textGray} />
-            <Text style={styles.radarText}>Radio de cobertura: 8.5 km</Text>
-          </View>
-        </View>
-
-        {/* Acciones Rápidas */}
-        <Text style={[styles.sectionTitle, {marginTop: 10, marginBottom: 12}]}>Acciones Rápidas de Estudio</Text>
-        
-        <TouchableOpacity style={styles.actionCard}>
-          <View style={styles.actionIconOrange}><Feather name="plus" size={18} color={colors.primary} /></View>
-          <View style={{flex: 1, marginLeft: 12}}>
-            <Text style={styles.actionTitle}>Añadir cita manual</Text>
-            <Text style={styles.actionSub}>Para clientes presenciales o por WhatsApp</Text>
-          </View>
-          <Feather name="chevron-right" size={18} color={colors.textGray} />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.actionCard}>
-          <View style={styles.actionIconGray}><Feather name="clock" size={18} color={colors.textDark} /></View>
-          <View style={{flex: 1, marginLeft: 12}}>
-            <Text style={styles.actionTitle}>Modificar disponibilidad de hoy</Text>
-            <Text style={styles.actionSub}>Bloquear franjas o abrir huecos extra</Text>
-          </View>
-          <Feather name="chevron-right" size={18} color={colors.textGray} />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.actionCard}>
-          <View style={styles.actionIconGray}><MaterialCommunityIcons name="qrcode-scan" size={18} color={colors.textDark} /></View>
-          <View style={{flex: 1, marginLeft: 12}}>
-            <Text style={styles.actionTitle}>Descargar código QR de tu perfil</Text>
-            <Text style={styles.actionSub}>Listo para imprimir y colocar en tu tocador</Text>
-          </View>
-          <Feather name="download" size={18} color={colors.textDark} />
-        </TouchableOpacity>
-
+        )}
       </ScrollView>
 
-      {/* Bottom Navigation (Visual Only) */}
-      <View style={styles.bottomNav}>
-        <View style={styles.navItem}>
-          <MaterialCommunityIcons name="view-grid" size={24} color={colors.primary} />
-          <Text style={[styles.navText, {color: colors.primary}]}>Dashboard</Text>
-        </View>
-        <View style={styles.navItem} OnPress={() => navigation.navigate('Agenda')}>
-          <Feather name="calendar" size={24} color="#A0A0A0" />
-          <Text style={styles.navText}>Agenda</Text>
-        </View>
-        <View style={styles.navItem} OnPress={() => navigation.navigate('Servicios')}>
-          <MaterialCommunityIcons name="flower-outline" size={24} color="#A0A0A0" />
-          <Text style={styles.navText}>Servicios</Text>
-        </View>
-        <View style={styles.navItem} OnPress={() => navigation.navigate('Billetera')}>
-          <Feather name="credit-card" size={24} color="#A0A0A0" />
-          <Text style={styles.navText}>Billetera</Text>
-        </View>
-        <View style={styles.navItem} OnPress={() => navigation.navigate('MiPerfil')}>
-          <Feather name="briefcase" size={24} color="#A0A0A0" />
-          <Text style={styles.navText}>Mi Perfil</Text>
-        </View>
-      </View>
+      <ChatServicioModal
+        visible={chatVisible}
+        solicitud={solicitud}
+        rolActual="profesional"
+        onClose={() => {
+          setChatVisible(false);
+          refrescar();
+        }}
+      />
 
+      <ProBottomNav navigation={navigation} active="ProDashboard" />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
-  greenDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#00C853' },
-  topNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, backgroundColor: '#FFF', borderBottomWidth: 1, borderColor: colors.border },
-  dashboardTitle: { fontSize: 18, fontWeight: '700', color: colors.textDark, marginLeft: 8 },
-  navRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  statusDropdown: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16 },
-  statusText: { fontSize: 11, fontWeight: '600', color: colors.textDark, marginRight: 4 },
-  iconBtn: { padding: 4 },
-  profileBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  
-  scrollContainer: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 },
-  greetingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
-  atelierStatus: { fontSize: 10, fontWeight: '700', color: colors.primary, letterSpacing: 1 },
-  nuevoBadge: { backgroundColor: '#FFF0ED', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
-  nuevoBadgeText: { fontSize: 9, fontWeight: '700', color: colors.primary },
-  greetingTitle: { fontSize: 24, fontWeight: '800', color: colors.textDark, marginVertical: 4 },
-  greetingSub: { fontSize: 12, color: colors.textGray },
-  liveBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F9F2', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: '#D7F0DC' },
-  liveTitle: { fontSize: 10, fontWeight: '700', color: colors.textDark },
-  liveSub: { fontSize: 9, color: colors.textGray },
-
-  onboardingCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: colors.border, marginBottom: 24, elevation: 1 },
-  onboardingHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  onboardingTitle: { fontSize: 15, fontWeight: '700', color: colors.textDark },
-  progressCircle: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F9F1EF', alignItems: 'center', justifyContent: 'center' },
-  progressCircleText: { fontSize: 10, fontWeight: '700', color: colors.primary, textAlign: 'center', lineHeight: 12 },
-  onboardingSub: { fontSize: 12, color: colors.textGray, marginTop: 4, marginBottom: 12 },
-  progressBar: { height: 4, backgroundColor: '#F5F5F5', borderRadius: 2, marginBottom: 16 },
-  progressFill: { height: 4, backgroundColor: colors.primary, borderRadius: 2 },
-  
-  taskCardActive: { backgroundColor: '#F9F9F9', borderRadius: 12, padding: 16, marginBottom: 10, borderWidth: 1, borderColor: '#F0F0F0' },
-  taskHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 },
-  taskTitle: { fontSize: 13, fontWeight: '700', color: colors.textDark },
-  taskSub: { fontSize: 11, color: colors.textGray, marginTop: 2 },
-  circleOutline: { width: 20, height: 20, borderRadius: 10, borderWidth: 1, borderColor: '#A0A0A0' },
-  copyBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF', paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
-  copyBtnText: { fontSize: 12, fontWeight: '600', color: colors.textDark, marginLeft: 8 },
-  
-  taskCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 12, padding: 16, marginBottom: 10, borderWidth: 1, borderColor: colors.border },
-  incomeBadge: { backgroundColor: '#FFF0ED', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 6 },
-  incomeBadgeText: { fontSize: 9, fontWeight: '700', color: colors.primary },
-  activateBtn: { backgroundColor: colors.accent, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-  activateBtnText: { fontSize: 11, fontWeight: '700', color: '#FFF' },
-  plusBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
-
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: colors.textDark },
-  sectionSub: { fontSize: 11, color: colors.textGray },
-  sectionSubOrange: { fontSize: 10, fontWeight: '700', color: colors.primary },
-  
-  metricsRow: { flexDirection: 'row', gap: 10, marginBottom: 24 },
-  metricCard: { flex: 1, backgroundColor: '#FFF', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border },
-  metricTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  metricLabel: { fontSize: 10, fontWeight: '600', color: colors.textDark },
-  metricValue: { fontSize: 18, fontWeight: '800', color: colors.textDark, marginBottom: 4 },
-  metricSub: { fontSize: 9, color: colors.textGray },
-  metricSubGreen: { fontSize: 9, fontWeight: '600', color: '#00C853' },
-
-  emptyStateCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: colors.border, marginBottom: 24 },
-  emptyIconCircle: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  emptyTitle: { fontSize: 14, fontWeight: '700', color: colors.textDark, marginBottom: 8 },
-  emptyDesc: { fontSize: 12, color: colors.textGray, textAlign: 'center', lineHeight: 18, marginBottom: 16 },
-  radarPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9F9F9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-  radarText: { fontSize: 10, color: colors.textGray, marginLeft: 6 },
-
-  actionCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: colors.border, marginBottom: 10 },
-  actionIconOrange: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFF0ED', alignItems: 'center', justifyContent: 'center' },
-  actionIconGray: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
-  actionTitle: { fontSize: 13, fontWeight: '700', color: colors.textDark },
-  actionSub: { fontSize: 11, color: colors.textGray, marginTop: 2 },
-
-  bottomNav: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', backgroundColor: '#FFF', paddingVertical: 10, borderTopWidth: 1, borderColor: colors.border },
-  navItem: { alignItems: 'center' },
-  navText: { fontSize: 9, color: '#A0A0A0', marginTop: 4, fontWeight: '600' }
+  fullScreenContainer: { flex: 1, backgroundColor: '#FFFFFF' },
+  fullScreenMapArea: { flex: 1, position: 'relative' },
+  floatingTopBar: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    right: 14,
+    backgroundColor: 'rgba(26,26,26,0.92)',
+    borderRadius: 14,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  statusDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#22C55E' },
+  floatingStatusLabel: { color: '#D48C70', fontSize: 10.5, fontWeight: '800' },
+  floatingEtaText: { color: '#FFFFFF', fontSize: 12.5, fontWeight: '700', marginTop: 2 },
+  floatingBottomCard: {
+    position: 'absolute',
+    bottom: 14,
+    left: 14,
+    right: 14,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  clientRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  clientAvatar: { width: 48, height: 48, borderRadius: 24 },
+  clientAvatarPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F3EFEA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clientName: { fontSize: 15, fontWeight: '800', color: colors.textDark },
+  serviceSub: { fontSize: 12, color: colors.primary, fontWeight: '700' },
+  addrRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
+  addrText: { fontSize: 11.5, color: colors.textGray, flex: 1 },
+  commButtonsRow: { flexDirection: 'row', gap: 8 },
+  iconCircleBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F6EFEB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionsRow: { flexDirection: 'row' },
+  primaryActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: colors.primary,
+    paddingVertical: 13,
+    borderRadius: 12,
+  },
+  primaryActionText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  secondaryActionBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3EFEA',
+    paddingVertical: 13,
+    borderRadius: 12,
+  },
+  secondaryActionText: { color: colors.textDark, fontSize: 12, fontWeight: '700' },
+  topNav: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+  },
+  dashboardTitle: { fontSize: 17, fontWeight: '800', color: colors.textDark },
+  proSubtitle: { fontSize: 11.5, color: colors.textGray, marginTop: 2 },
+  bellBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F8F6F4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  bellBadge: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    backgroundColor: '#C0392B',
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
+  walletBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  walletBadgeText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  scroll: { paddingTop: 14, paddingBottom: 36 },
+  inlineNotifPanel: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 16,
+  },
+  inlineNotifHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  inlineNotifTitle: { fontSize: 14, fontWeight: '800', color: colors.textDark },
+  emptyNotifText: { fontSize: 12.5, color: colors.textGray, paddingVertical: 10 },
+  notifItem: {
+    backgroundColor: '#F8F6F4',
+    padding: 11,
+    borderRadius: 10,
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
+  },
+  notifTitle: { fontSize: 12.5, fontWeight: '800', color: colors.textDark },
+  notifTime: { fontSize: 10.5, color: colors.textGray },
+  notifMsg: { fontSize: 12, color: colors.textGray, marginTop: 3 },
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.textGray,
+    letterSpacing: 0.7,
+    marginBottom: 10,
+  },
+  emptyCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  emptyTitle: { fontSize: 15, fontWeight: '800', color: colors.textDark, marginTop: 10 },
+  emptySub: {
+    fontSize: 12.5,
+    color: colors.textGray,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  reqCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  reqTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  reqBadge: { fontSize: 10.5, fontWeight: '800', color: colors.primary },
+  reqState: { fontSize: 10.5, fontWeight: '800', color: '#1E824C' },
+  reqTitle: { fontSize: 16, fontWeight: '800', color: colors.textDark, marginBottom: 4 },
+  reqMeta: { fontSize: 12.5, color: colors.textDark, marginBottom: 4 },
+  reqAddr: { fontSize: 12, color: colors.textGray },
+  decisionRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  rejectBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#FDEDEC',
+  },
+  rejectBtnText: { color: '#C0392B', fontSize: 13, fontWeight: '700' },
+  acceptBtn: {
+    flex: 1.4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+  },
+  acceptBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  pendingClientBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F6EFEB',
+    padding: 12,
+    borderRadius: 12,
+    marginTop: 12,
+  },
+  pendingClientText: { flex: 1, fontSize: 12, color: colors.textDark, lineHeight: 17 },
+  openChatBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#F8F6F4',
+    paddingVertical: 11,
+    borderRadius: 12,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  openChatBtnText: { fontSize: 12.5, fontWeight: '700', color: colors.textDark },
 });

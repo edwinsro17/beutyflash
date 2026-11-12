@@ -1,106 +1,95 @@
+/**
+ * Archivo: src/screens/ServicesAndPricingScreen.js
+ * Configuración de Carta de Servicios en Pesos Colombianos (COP) y Comisión del 10%
+ */
+
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, StatusBar, Switch } from 'react-native';
+import {
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
+  ScrollView,
+  StatusBar,
+  Switch,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-
-const colors = { background: '#FAFAFA', surface: '#FFFFFF', primary: '#8B503E', textDark: '#1E1E1E', textGray: '#707070', border: '#EAEAEA', accent: '#D89C8F' };
+import { colors, formatCOP, calcularComisionCOP } from '../theme/colors';
 
 export default function ServicesAndPricingScreen({ navigation }) {
   const [services, setServices] = useState([
-    { id: 1, tag: 'Coloración • Signature', title: 'Balayage Babylights + Matiz Gl...', desc: 'Aclarado artesanal con matiz botánico y sellado hidratante', time: '120 min', price: '120 €', active: true },
-    { id: 2, tag: 'Peluquería', title: 'Corte de Autor & Blowout', desc: 'Diagnóstico morfológico, lavado relajante y brushing pulido', time: '45 min', price: '45 €', active: false },
-    { id: 3, tag: 'Peluquería • Cuidado', title: 'Tratamiento Botox Capilar Org...', desc: 'Regeneración intensiva profunda anti-frizz libre de formol', time: '60 min', price: '65 €', active: true },
-    { id: 4, tag: 'Estética', title: 'Manicura Rusa Semipermanente', desc: 'Limpieza con torno de precisión y esmaltado nivelado', time: '50 min', price: '38 €', active: true },
+    {
+      id: 1,
+      title: 'Balayage Signature + Matiz Gloss',
+      time: '120 min',
+      priceCop: 180000,
+      active: true,
+    },
+    {
+      id: 2,
+      title: 'Corte de Autor & Cepillado Blower',
+      time: '50 min',
+      priceCop: 55000,
+      active: true,
+    },
+    {
+      id: 3,
+      title: 'Manicura Rusa Semipermanente',
+      time: '60 min',
+      priceCop: 45000,
+      active: true,
+    },
   ]);
 
-  const [estudio, setEstudio] = useState(true);
-  const [domicilio, setDomicilio] = useState(true);
-
   const toggleService = (index) => {
-    const newServices = [...services];
-    newServices[index].active = !newServices[index].active;
-    setServices(newServices);
+    const copy = [...services];
+    copy[index].active = !copy[index].active;
+    setServices(copy);
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={{padding: 5}}><Feather name="arrow-left" size={24} color={colors.textDark} /></TouchableOpacity>
-        <Text style={styles.headerTitle}>Services And Pricing</Text>
-        <TouchableOpacity><View style={styles.headerProfileIcon}><Feather name="user" size={16} color="#FFF" /></View></TouchableOpacity>
-      </View>
-      <View style={styles.progressBar}><View style={[styles.progressFill, {width: '50%'}]} /></View>
-
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>Configura tu Carta de Servicios</Text>
-        <Text style={styles.description}>Selecciona los tratamientos exclusivos que ofreces, fija tus precios base y tiempos estimados.</Text>
-
-        <TouchableOpacity style={styles.addButton}>
-          <View style={styles.addIcon}><Feather name="plus" size={20} color={colors.primary} /></View>
-          <View style={{flex: 1}}>
-            <Text style={styles.addButtonTitle}>+ Añadir Nuevo Tratamiento</Text>
-            <Text style={styles.addButtonDesc}>Crea un ritual personalizado con duración y precio</Text>
-          </View>
-          <Feather name="chevron-right" size={18} color={colors.textGray} />
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <Feather name="arrow-left" size={22} color={colors.textDark} />
         </TouchableOpacity>
+        <Text style={styles.headerTitle}>Servicios y Precios (COP)</Text>
+        <View style={{ width: 40 }} />
+      </View>
 
-        <View style={styles.filterRow}>
-          <TouchableOpacity style={[styles.filterPill, styles.filterPillActive]}><Text style={styles.filterPillTextActive}>Todos (4)</Text></TouchableOpacity>
-          <TouchableOpacity style={styles.filterPill}><Text style={styles.filterPillText}>Peluquería (3)</Text></TouchableOpacity>
-          <TouchableOpacity style={styles.filterPill}><Text style={styles.filterPillText}>Coloración (2)</Text></TouchableOpacity>
-        </View>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <Text style={styles.title}>Configura tus Tarifas en COP</Text>
+        <Text style={styles.description}>
+          Recuerda que la plataforma descuenta el 10% de comisión de tu saldo por cada servicio que aceptes.
+        </Text>
 
-        {/* Lista de Servicios */}
-        {services.map((item, index) => (
-          <View key={item.id} style={styles.serviceCard}>
-            <View style={styles.serviceHeader}>
-              <View style={styles.serviceTag}><Text style={styles.serviceTagText}>{item.tag}</Text></View>
-              <Switch value={item.active} onValueChange={() => toggleService(index)} trackColor={{ false: '#EAEAEA', true: colors.accent }} thumbColor="#FFF" />
+        {services.map((item, idx) => (
+          <View key={item.id} style={styles.card}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={styles.serviceTitle}>{item.title}</Text>
+              <Switch
+                value={item.active}
+                onValueChange={() => toggleService(idx)}
+                trackColor={{ false: '#EAEAEA', true: colors.primary }}
+                thumbColor="#FFFFFF"
+              />
             </View>
-            <Text style={styles.serviceTitle}>{item.title}</Text>
-            <Text style={styles.serviceDesc}>{item.desc}</Text>
-            <View style={styles.serviceFooter}>
-              <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                <Feather name="clock" size={12} color={colors.textGray} />
-                <Text style={styles.serviceTime}> {item.time}</Text>
-                <Text style={styles.servicePrice}>   {item.price}</Text>
-              </View>
-              <TouchableOpacity style={styles.editIcon}><Feather name="sliders" size={14} color={colors.textDark} /></TouchableOpacity>
-            </View>
+            <Text style={styles.meta}>Duración: {item.time}</Text>
+            <Text style={styles.price}>
+              Precio: {formatCOP(item.priceCop)} COP • Comisión 10%:{' '}
+              {formatCOP(calcularComisionCOP(item.priceCop))}
+            </Text>
           </View>
         ))}
 
-        {/* Modalidad de Servicio */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Modalidad de Servicio</Text>
-          <Text style={styles.sectionSub}>UBICACIONES</Text>
-        </View>
-
-        <TouchableOpacity style={styles.checkboxCard} onPress={() => setEstudio(!estudio)}>
-          <View style={[styles.checkbox, estudio && styles.checkboxActive]}>{estudio && <Feather name="check" size={14} color="#FFF" />}</View>
-          <View style={{flex: 1}}>
-            <Text style={styles.checkTitle}>En mi Estudio / Salón</Text>
-            <Text style={styles.checkSub}>Calle Velázquez 34, Salamanca, Madrid</Text>
-          </View>
-          <Text style={styles.changeText}>Cambiar</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.checkboxCard} onPress={() => setDomicilio(!domicilio)}>
-          <View style={[styles.checkbox, domicilio && styles.checkboxActive]}>{domicilio && <Feather name="check" size={14} color="#FFF" />}</View>
-          <View style={{flex: 1}}>
-            <Text style={styles.checkTitle}>A Domicilio (BeautyFlash Go)</Text>
-            <Text style={styles.checkSub}>Atiende clientes en residencias, hoteles y suites privadas</Text>
-          </View>
-          <View style={styles.suplementoBadge}><Text style={styles.suplementoText}>+ Suplemento</Text></View>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.mainButton} onPress={() => navigation.navigate('AvailabilityAndZone')}>
-          <Text style={styles.mainButtonText}>Continuar a Zona y Horarios (Paso 3)</Text>
-          <Feather name="arrow-right" size={16} color="#FFF" style={{marginLeft: 8}} />
-        </TouchableOpacity>
-        <TouchableOpacity style={{alignItems: 'center'}} onPress={() => navigation.goBack()}>
-          <Text style={styles.backText}>← Volver al Paso 1</Text>
+        <TouchableOpacity
+          style={styles.mainBtn}
+          onPress={() => navigation.navigate('AvailabilityAndZone')}
+        >
+          <Text style={styles.mainBtnText}>Continuar a Zona y Cobertura</Text>
+          <Feather name="arrow-right" size={18} color="#FFFFFF" style={{ marginLeft: 8 }} />
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -109,45 +98,44 @@ export default function ServicesAndPricingScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 10 },
-  headerTitle: { fontSize: 16, fontWeight: '600', color: colors.textDark },
-  headerProfileIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  progressBar: { height: 2, backgroundColor: colors.border, marginBottom: 16 },
-  progressFill: { height: 2, backgroundColor: colors.primary },
-  scrollContainer: { paddingHorizontal: 20, paddingBottom: 40 },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: { fontSize: 16, fontWeight: '800', color: colors.textDark },
+  scroll: { paddingHorizontal: 20, paddingBottom: 40 },
   title: { fontSize: 22, fontWeight: '800', color: colors.textDark, marginBottom: 6 },
-  description: { fontSize: 13, color: colors.textGray, lineHeight: 20, marginBottom: 20 },
-  addButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: colors.border, marginBottom: 20 },
-  addIcon: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#F9F1EF', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  addButtonTitle: { fontSize: 14, fontWeight: '700', color: colors.textDark },
-  addButtonDesc: { fontSize: 11, color: colors.textGray, marginTop: 2 },
-  filterRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  filterPill: { backgroundColor: '#F0F0F0', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16 },
-  filterPillActive: { backgroundColor: colors.primary },
-  filterPillText: { fontSize: 12, fontWeight: '600', color: colors.textGray },
-  filterPillTextActive: { fontSize: 12, fontWeight: '600', color: '#FFF' },
-  serviceCard: { backgroundColor: '#FFF', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: colors.border, marginBottom: 12 },
-  serviceHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  serviceTag: { backgroundColor: '#F5F5F5', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  serviceTagText: { fontSize: 10, fontWeight: '600', color: colors.textGray },
-  serviceTitle: { fontSize: 15, fontWeight: '700', color: colors.textDark, marginBottom: 4 },
-  serviceDesc: { fontSize: 12, color: colors.textGray, marginBottom: 12, lineHeight: 18 },
-  serviceFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  serviceTime: { fontSize: 12, color: colors.textGray },
-  servicePrice: { fontSize: 14, fontWeight: '700', color: colors.textDark },
-  editIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 16, marginBottom: 12 },
-  sectionTitle: { fontSize: 16, fontWeight: '800', color: colors.textDark },
-  sectionSub: { fontSize: 10, fontWeight: '700', color: colors.textGray },
-  checkboxCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: colors.border, marginBottom: 10 },
-  checkbox: { width: 20, height: 20, borderRadius: 4, borderWidth: 1, borderColor: '#A0A0A0', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  checkboxActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  checkTitle: { fontSize: 13, fontWeight: '600', color: colors.textDark },
-  checkSub: { fontSize: 11, color: colors.textGray, marginTop: 2 },
-  changeText: { fontSize: 11, color: colors.primary, fontWeight: '600' },
-  suplementoBadge: { backgroundColor: '#FFF0ED', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
-  suplementoText: { fontSize: 10, color: colors.primary, fontWeight: '600' },
-  mainButton: { backgroundColor: colors.primary, flexDirection: 'row', borderRadius: 12, paddingVertical: 16, alignItems: 'center', justifyContent: 'center', marginTop: 20, marginBottom: 12 },
-  mainButtonText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
-  backText: { fontSize: 11, color: colors.textGray }
+  description: { fontSize: 13.5, color: colors.textGray, marginBottom: 16 },
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 12,
+  },
+  serviceTitle: { fontSize: 15, fontWeight: '800', color: colors.textDark, flex: 1 },
+  meta: { fontSize: 12, color: colors.textGray, marginVertical: 4 },
+  price: { fontSize: 13.5, fontWeight: '800', color: colors.primary },
+  mainBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  mainBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
 });

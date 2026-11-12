@@ -1,3 +1,8 @@
+/**
+ * Archivo: src/screens/WelcomeScreen.js
+ * Pantalla de Bienvenida que redirige al Login o al Registro según el perfil elegido (Cliente o Profesional)
+ */
+
 import React from 'react';
 import {
   StyleSheet,
@@ -6,23 +11,29 @@ import {
   Image,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
   StatusBar,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { colors } from '../theme/colors';
+import { colors, sessionStore } from '../theme/colors';
 import FeatureCard from '../components/FeatureCard';
 import CustomButton from '../components/CustomButton';
 
-export default function WelcomeScreen({ navigation }) {
+export default function WelcomeScreen({ navigation, route }) {
+  const role = route?.params?.role || sessionStore.selectedRole || 'cliente';
+
+  const handleIrARegistro = () => {
+    if (role === 'profesional') {
+      navigation.navigate('SpecialistRegistration');
+    } else {
+      navigation.navigate('ClientRegistration');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
-      <ScrollView 
-        contentContainerStyle={styles.scrollContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* 1. Header con Logo y Subtítulo */}
+      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View style={styles.logoCard}>
             <View style={styles.logoRow}>
@@ -32,68 +43,73 @@ export default function WelcomeScreen({ navigation }) {
           </View>
         </View>
 
-        {/* 2. Tarjeta con Imagen Principal y Badge Flotante */}
         <View style={styles.imageCardContainer}>
           <Image
-            source={{ uri: 'https://i.pinimg.com/736x/53/4e/14/534e1486771eec2f801c4718c443c073.jpg' }}
+            source={{
+              uri: 'https://images.unsplash.com/photo-1522337660859-02fbefca4702?q=80&w=800&auto=format&fit=crop',
+            }}
             style={styles.heroImage}
           />
           <View style={styles.floatingBadge}>
             <View style={styles.badgeLeft}>
               <Ionicons name="star" size={16} color={colors.accent} />
-              <Text style={styles.badgeTitle}>Experiencia 5 Estrellas</Text>
+              <Text style={styles.badgeTitle}>
+                Modo: {role === 'profesional' ? 'Especialista Pro' : 'Cliente VIP'}
+              </Text>
             </View>
             <View style={styles.badgeRightTag}>
-              <Text style={styles.badgeTagText}>+400 Especialistas</Text>
+              <Text style={styles.badgeTagText}>Colombia • COP</Text>
             </View>
           </View>
         </View>
 
-        {/* 3. Título y Descripción */}
         <View style={styles.textBlock}>
           <Text style={styles.heading}>
-            Belleza experta,{'\n'}
-            <Text style={styles.headingHighlight}>donde estés</Text>
+            {role === 'profesional' ? 'Impulsa tu talento,' : 'Belleza experta,'}
+            {'\n'}
+            <Text style={styles.headingHighlight}>
+              {role === 'profesional' ? 'gana en cada cita' : 'donde estés'}
+            </Text>
           </Text>
           <Text style={styles.description}>
-            Servicios de belleza a domicilio y en local. Encuentra a los mejores barberos, estilistas,
-            maquilladores y especialistas en segundos.
+            {role === 'profesional'
+              ? 'Recibe solicitudes a domicilio y reservas en tu salón. Activa tu billetera desde $10.000 COP con solo 10% de comisión.'
+              : 'Servicios de belleza a domicilio estilo Uber/DiDi y reservas en local. Encuentra estilistas, barberos y manicuristas en segundos.'}
           </Text>
         </View>
 
-        {/* 4. Tarjetas de Beneficios usando el COMPONENTE REUTILIZABLE */}
         <View style={styles.featuresRow}>
-          <FeatureCard iconName="shield" label={"Profesionales\nverificados"} />
-          <FeatureCard iconName="calendar" label={"Citas\nflexibles"} />
-          <FeatureCard iconName="lock" label={"Pagos\nseguros"} />
+          <FeatureCard iconName="shield" label={'Profesionales\nverificados'} />
+          <FeatureCard iconName="map-pin" label={'Ruta en vivo\nGoogle Maps'} />
+          <FeatureCard iconName="credit-card" label={'Precios claros\nen COP'} />
         </View>
 
-        {/* 5. Botones de Acción usando el COMPONENTE REUTILIZABLE */}
         <View style={styles.buttonContainer}>
-          <CustomButton 
-            title="Iniciar Sesión" 
-            variant="primary" 
-            onPress={() => navigation.navigate('Login')} 
+          <CustomButton
+            title={`Iniciar Sesión como ${role === 'profesional' ? 'Profesional' : 'Cliente'}`}
+            variant="primary"
+            onPress={() => navigation.navigate('Login', { role })}
           />
-          <CustomButton 
-            title="Registrarse" 
-            variant="secondary" 
-            onPress={() => navigation.replace('AccountSelection')} 
+          <CustomButton
+            title={`Registrarme como ${role === 'profesional' ? 'Profesional' : 'Cliente'}`}
+            variant="secondary"
+            onPress={handleIrARegistro}
           />
         </View>
 
-        {/* 6. Selector de Idioma y Legal */}
-        <View style={styles.footer}>
-          <TouchableOpacity style={styles.langSelector}>
-            <MaterialCommunityIcons name="earth" size={16} color={colors.textGray} />
-            <Text style={styles.langText}>Español (ES)</Text>
-            <Feather name="chevron-down" size={14} color={colors.textGray} />
-          </TouchableOpacity>
+        <TouchableOpacity
+          style={{ marginBottom: 16 }}
+          onPress={() => navigation.navigate('AccountSelection')}
+        >
+          <Text style={{ fontSize: 13, fontWeight: '700', color: colors.primary }}>
+            Ver comparativa de cuentas (Cliente vs Profesional)
+          </Text>
+        </TouchableOpacity>
 
-          <View style={styles.legalRow}>
-            <TouchableOpacity><Text style={styles.legalText}>Términos del Servicio</Text></TouchableOpacity>
-            <Text style={styles.legalDot}>•</Text>
-            <TouchableOpacity><Text style={styles.legalText}>Privacidad</Text></TouchableOpacity>
+        <View style={styles.footer}>
+          <View style={styles.langSelector}>
+            <MaterialCommunityIcons name="earth" size={16} color={colors.textGray} />
+            <Text style={styles.langText}>Español (Colombia - COP)</Text>
           </View>
         </View>
       </ScrollView>
@@ -101,12 +117,8 @@ export default function WelcomeScreen({ navigation }) {
   );
 }
 
-// Estilos reducidos (solo los de estructura base, ya que componentes y colores se extrajeron)
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
+  safeArea: { flex: 1, backgroundColor: colors.background },
   scrollContainer: {
     paddingHorizontal: 22,
     paddingTop: 16,
@@ -120,16 +132,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     borderRadius: 18,
     elevation: 3,
-    marginBottom: 10,
   },
   logoRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  logoTextBold: { fontSize: 16, fontWeight: '800', color: colors.textDark },
-  logoTextThin: { fontSize: 16, fontWeight: '400', color: colors.flashIcon },
-  conciergeText: { fontSize: 11, letterSpacing: 2, fontWeight: '700', color: colors.accent },
-  
+  logoTextBold: { fontSize: 18, fontWeight: '800', color: colors.textDark },
+  logoTextThin: { fontSize: 18, fontWeight: '600', color: colors.flashIcon },
   imageCardContainer: {
     width: '100%',
-    height: 240,
+    height: 230,
     borderRadius: 20,
     overflow: 'hidden',
     position: 'relative',
@@ -137,28 +146,60 @@ const styles = StyleSheet.create({
   },
   heroImage: { width: '100%', height: '100%' },
   floatingBadge: {
-    position: 'absolute', bottom: 12, left: 12, right: 12,
+    position: 'absolute',
+    bottom: 12,
+    left: 12,
+    right: 12,
     backgroundColor: 'rgba(255, 255, 255, 0.94)',
-    borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   badgeLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   badgeTitle: { fontSize: 13, fontWeight: '700', color: colors.secondaryText },
-  badgeRightTag: { backgroundColor: colors.badgeBg, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  badgeRightTag: {
+    backgroundColor: colors.badgeBg,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
   badgeTagText: { fontSize: 11, fontWeight: '700', color: colors.badgeText },
-
   textBlock: { alignItems: 'center', marginBottom: 20, paddingHorizontal: 8 },
-  heading: { fontSize: 27, fontWeight: '800', color: colors.textDark, textAlign: 'center', lineHeight: 34, marginBottom: 10 },
+  heading: {
+    fontSize: 27,
+    fontWeight: '800',
+    color: colors.textDark,
+    textAlign: 'center',
+    lineHeight: 34,
+    marginBottom: 10,
+  },
   headingHighlight: { color: colors.accent },
-  description: { fontSize: 14, lineHeight: 20, color: colors.textGray, textAlign: 'center' },
-
-  featuresRow: { flexDirection: 'row', width: '100%', justifyContent: 'space-between', gap: 8, marginBottom: 24 },
-  buttonContainer: { width: '100%', gap: 10, marginBottom: 24 },
-
+  description: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.textGray,
+    textAlign: 'center',
+  },
+  featuresRow: {
+    flexDirection: 'row',
+    width: '100%',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 24,
+  },
+  buttonContainer: { width: '100%', gap: 10, marginBottom: 16 },
   footer: { alignItems: 'center', gap: 12 },
-  langSelector: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.border, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, gap: 6 },
-  langText: { fontSize: 12, color: '#444', fontWeight: '500' },
-  legalRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  legalText: { fontSize: 12, color: '#7C7773' },
-  legalDot: { fontSize: 12, color: '#7C7773' },
+  langSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+  },
+  langText: { fontSize: 12, color: '#444', fontWeight: '600' },
 });
