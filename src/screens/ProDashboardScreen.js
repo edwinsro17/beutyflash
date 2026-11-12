@@ -124,8 +124,11 @@ export default function ProDashboardScreen({ navigation }) {
                 {formatearEtiquetaEstado(solicitud.estado).toUpperCase()}
               </Text>
               <Text style={styles.floatingEtaText}>
-                Distancia: {solicitud.distancia_estimada_km ?? 1.2} km • Tiempo estimado:{' '}
-                {solicitud.tiempo_estimado_minutos ?? 5} min
+                {solicitud.distancia_estimada_km === 0 || (solicitud.distancia_estimada_km !== null && solicitud.distancia_estimada_km <= 0.03)
+                  ? 'Ya estás en el lugar'
+                  : solicitud.tiempo_estimado_minutos === null || solicitud.tiempo_estimado_minutos === undefined
+                  ? `Distancia aprox.: ${solicitud.distancia_estimada_km ?? '--'} km • Tiempo estimado no disponible`
+                  : `Distancia: ${solicitud.distancia_estimada_km} km • Tiempo estimado: ${solicitud.tiempo_estimado_minutos} min`}
               </Text>
             </View>
           </View>

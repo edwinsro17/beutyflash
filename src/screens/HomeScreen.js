@@ -17,8 +17,8 @@ import {
   TextInput,
   TouchableOpacity,
   Image,
-  StatusBar,
   ActivityIndicator,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -39,6 +39,7 @@ import {
   confirmarDefinitivamentePorCliente,
   actualizarEstadoSolicitudActiva,
   generarHtmlMapaUber,
+  calcularRutaYDistanciaReal,
 } from '../theme/colors';
 import CategoryItem from '../components/CategoryItem';
 import BottomMenu from '../components/BottomMenu';
@@ -167,8 +168,11 @@ export default function HomeScreen({ navigation }) {
                 {formatearEtiquetaEstado(reservaActiva.estado).toUpperCase()}
               </Text>
               <Text style={styles.floatingEtaText}>
-                Tiempo estimado de llegada: {reservaActiva.tiempo_estimado_minutos ?? 5} min (
-                {reservaActiva.distancia_estimada_km ?? 1.2} km)
+                {reservaActiva.distancia_estimada_km === 0 || (reservaActiva.distancia_estimada_km !== null && reservaActiva.distancia_estimada_km <= 0.03)
+                  ? 'El profesional se encuentra en tu ubicación'
+                  : reservaActiva.tiempo_estimado_minutos === null || reservaActiva.tiempo_estimado_minutos === undefined
+                  ? `Distancia aprox.: ${reservaActiva.distancia_estimada_km ?? '--'} km • Tiempo estimado no disponible`
+                  : `Distancia: ${reservaActiva.distancia_estimada_km} km • Tiempo estimado: ${reservaActiva.tiempo_estimado_minutos} min`}
               </Text>
             </View>
           </View>

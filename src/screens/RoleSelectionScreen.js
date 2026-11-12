@@ -1,6 +1,7 @@
 /**
  * Archivo: src/screens/RoleSelectionScreen.js
- * Selección de Rol (Soy Cliente / Soy Profesional) sincronizada con el Login y Registro
+ * Apartado «Elige tu experiencia» con diseño comercial, sobrio y minimalista,
+ * sin fotografías ni ilustraciones genéricas.
  */
 
 import React, { useState } from 'react';
@@ -14,10 +15,11 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, sessionStore } from '../theme/colors';
+import { colors, sessionStore, useResponsiveLayout } from '../theme/colors';
 import RoleCard from '../components/RoleCard';
 
 export default function RoleSelectionScreen({ navigation }) {
+  const layout = useResponsiveLayout();
   const [role, setRole] = useState(sessionStore.selectedRole || 'cliente');
 
   const handleSelectRole = (nuevoRol) => {
@@ -25,81 +27,83 @@ export default function RoleSelectionScreen({ navigation }) {
     sessionStore.selectedRole = nuevoRol;
   };
 
+  const handleContinuarLogin = () => {
+    sessionStore.selectedRole = role;
+    navigation.navigate('Login', { role });
+  };
+
+  const handleIrARegistro = () => {
+    sessionStore.selectedRole = role;
+    if (role === 'profesional') {
+      navigation.navigate('SpecialistRegistration');
+    } else {
+      navigation.navigate('ClientRegistration');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.scrollContainer, layout.contentContainerStyle]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton}>
-            <Feather name="star" size={18} color={colors.primary} />
-          </TouchableOpacity>
-          <View style={styles.pill}>
-            <Text style={styles.pillText}>• COLOMBIA • DOMICILIO & SALÓN</Text>
+          <View style={styles.brandRow}>
+            <Text style={styles.brandBeauty}>Beauty</Text>
+            <Text style={styles.brandFlash}>Flash</Text>
           </View>
-          <View style={{ width: 40 }} />
-        </View>
+          <View style={styles.pill}>
+            <Text style={styles.pillText}>SELECCIÓN DE PERFIL</Text>
+          </View>
+        </View> 
 
         <View style={styles.titleSection}>
-          <Text style={styles.subHeading}>BIENVENIDO A BEAUTYFLASH</Text>
+          <Text style={styles.subHeading}>CONFIGURA TU ACCESO</Text>
           <Text style={styles.heading}>Elige tu experiencia</Text>
           <Text style={styles.description}>
-            ¿Cómo deseas utilizar BeautyFlash hoy?{'\n'}
-            Personalizaremos tu inicio de sesión y registro según tu perfil.
+            Selecciona cómo deseas ingresar para adaptar las herramientas y funciones a tu perfil.
           </Text>
         </View>
 
         <RoleCard
           selected={role === 'cliente'}
           onPress={() => handleSelectRole('cliente')}
-          tagText="BUSCO PROFESIONALES"
-          iconName="leaf"
-          imageUri="https://images.unsplash.com/photo-1522337660859-02fbefca4702?q=80&w=800&auto=format&fit=crop"
-          imageBadgeIcon="shield"
-          imageBadgeText="Domicilio & Salones VIP"
-          title="Soy Cliente"
-          description="Quiero pedir servicios de corte, cepillado, manicura, maquillaje o barbería a domicilio estilo Uber/DiDi o reservar en un local."
-          feature1Icon="clock"
-          feature1Text="En vivo en Google Maps"
-          feature2Icon="credit-card"
-          feature2Text="Precios en COP ($25.000+)"
+          roleLabel="CLIENTE"
+          iconName="search"
+          title="Encuentra lo que necesitas."
+          description="Descubre profesionales, solicita servicios y gestiona tus solicitudes fácilmente."
+          highlights={[
+            { icon: 'map-pin', label: 'Seguimiento en tiempo real' },
+            { icon: 'message-square', label: 'Comunicación directa' },
+          ]}
         />
 
         <RoleCard
           selected={role === 'profesional'}
           onPress={() => handleSelectRole('profesional')}
-          tagText="GANA CON TUS SERVICIOS"
-          iconName="content-cut"
-          imageUri="https://images.unsplash.com/photo-1596462502278-27bfdc403348?q=80&w=800&auto=format&fit=crop"
-          imageBadgeIcon="bar-chart-2"
-          imageBadgeText="Comisión 10% • Recarga $10.000"
-          title="Soy Profesional"
-          description="Quiero ofrecer mis servicios a domicilio o en mi local, gestionar mi billetera en COP y recibir nuevas solicitudes en tiempo real."
-          feature1Icon="calendar"
-          feature1Text="Recarga mín. $10.000"
-          feature2Icon="trending-up"
-          feature2Text="Solo 10% comisión"
+          roleLabel="PROFESIONAL"
+          iconName="briefcase"
+          title="Ofrece tus servicios."
+          description="Conecta con nuevos clientes, administra tus solicitudes y haz crecer tu actividad profesional."
+          highlights={[
+            { icon: 'layers', label: 'Gestión de catálogo y agenda' },
+            { icon: 'navigation', label: 'Rutas hacia tus clientes' },
+          ]}
         />
 
-        <TouchableOpacity
-          style={styles.mainButton}
-          onPress={() => navigation.navigate('Welcome', { role })}
-        >
+        <TouchableOpacity style={styles.mainButton} onPress={handleContinuarLogin}>
           <Text style={styles.mainButtonText}>
-            Continuar como {role === 'profesional' ? 'Profesional' : 'Cliente'}
+            Iniciar sesión como {role === 'profesional' ? 'Profesional' : 'Cliente'}
           </Text>
+          <Feather name="arrow-right" size={18} color="#FFFFFF" style={{ marginLeft: 8 }} />
         </TouchableOpacity>
 
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>
-            ¿Ya tienes cuenta?{' '}
-            <Text
-              style={styles.footerHighlight}
-              onPress={() => navigation.navigate('Login', { role })}
-            >
-              Iniciar sesión
-            </Text>
+        <TouchableOpacity style={styles.secondaryButton} onPress={handleIrARegistro}>
+          <Text style={styles.secondaryButtonText}>
+            Crear una cuenta de {role === 'profesional' ? 'Profesional' : 'Cliente'}
           </Text>
-        </View>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -107,50 +111,52 @@ export default function RoleSelectionScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
-  scrollContainer: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 40 },
+  scrollContainer: { paddingTop: 18, paddingBottom: 36 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 24,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 2,
-  },
+  brandRow: { flexDirection: 'row', alignItems: 'center' },
+  brandBeauty: { fontSize: 22, fontStyle: 'italic', color: colors.textDark },
+  brandFlash: { fontSize: 22, fontWeight: '800', color: colors.primary },
   pill: {
     backgroundColor: '#F3EFEA',
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 16,
+    borderRadius: 999,
   },
-  pillText: { fontSize: 10, fontWeight: '700', color: colors.accent, letterSpacing: 1 },
-  titleSection: { marginBottom: 24 },
+  pillText: { fontSize: 10, fontWeight: '800', color: colors.primary, letterSpacing: 1 },
+  titleSection: { marginBottom: 22 },
   subHeading: {
     fontSize: 11,
-    fontWeight: '700',
-    color: colors.accent,
+    fontWeight: '800',
+    color: colors.primary,
     letterSpacing: 1,
-    marginBottom: 8,
+    marginBottom: 6,
   },
-  heading: { fontSize: 28, fontWeight: '800', color: colors.textDark, marginBottom: 12 },
-  description: { fontSize: 14, color: colors.textGray, lineHeight: 22 },
+  heading: { fontSize: 28, fontWeight: '800', color: colors.textDark, marginBottom: 8 },
+  description: { fontSize: 14, color: colors.textGray, lineHeight: 21 },
   mainButton: {
     backgroundColor: colors.primary,
     borderRadius: 14,
-    paddingVertical: 16,
+    paddingVertical: 15,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 8,
-    marginBottom: 24,
+    marginTop: 6,
+    marginBottom: 12,
   },
-  mainButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
-  footer: { alignItems: 'center' },
-  footerText: { fontSize: 14, color: colors.textGray },
-  footerHighlight: { color: colors.accent, fontWeight: '700' },
+  mainButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  secondaryButton: {
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  secondaryButtonText: { color: colors.textDark, fontSize: 14, fontWeight: '700' },
 });

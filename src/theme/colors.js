@@ -11,7 +11,7 @@
  * - Sin emojis en ninguna parte del código.
  */
 
-import { Platform, Vibration, useWindowDimensions } from 'react-native';
+import { Platform, Vibration, Dimensions, useWindowDimensions } from 'react-native';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -425,18 +425,10 @@ export async function obtenerUbicacionExactaGPS(rol = 'cliente') {
  * Calcula la distancia en kilómetros entre dos coordenadas reales (fórmula de Haversine).
  */
 export function calcularDistanciaKm(lat1, lon1, lat2, lon2) {
-  if (!lat1 || !lon1 || !lat2 || !lon2) return null;
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Number((R * c).toFixed(2));
+  const m = calcularDistanciaMetros(lat1, lon1, lat2, lon2);
+  if (m === null) return null;
+  if (m <= 25) return 0;
+  return Number((m / 1000).toFixed(2));
 }
 
 /**
@@ -932,8 +924,14 @@ export async function crearUnicaSolicitudServicio({
       lngCli - 0.0028
   );
 
-  const distKm = calcularDistanciaKm(latCli, lngCli, latPro, lngPro) || 1.2;
-  const etaMin = Math.max(3, Math.round(distKm * 4));
+  const calculoRuta = await calcularRutaYDistanciaReal({
+    latProfesional: latPro,
+    lngProfesional: lngPro,
+    latCliente: latCli,
+    lngCliente: lngCli,
+  });
+  const distKm = calculoRuta.distancia_km;
+  const etaMin = calculoRuta.eta_minutos;
 
   const recargo = modalidad === 'domicilio' ? 8000 : 0;
   const baseCop = Number(precio_servicio_cop) || 10000;
@@ -1570,17 +1568,574 @@ export function generarHtmlMapaUber({
   `;
 }
 
-export function cerrarSesionActiva(navigation) {
+
+// =============================================================================
+// PERSISTENCIA LOCAL DE ONBOARDING Y SESIÓN + CÁLCULO RIGUROSO DE DISTANCIAS
+// =============================================================================
+const STORAGE_KEY_ONBOARDING = 'beautyflash_onboarding_completed_v1';
+const STORAGE_KEY_SESSION = 'beautyflash_active_session_v1';
+
+function obtenerDeviceSignature() {
+  const { width, height } = Dimensions.get('screen');
+  return `bf-dev-${Platform.OS}-${Platform.Version || '1'}-${Math.round(width)}x${Math.round(height)}`;
+}
+
+function leerLocalStorageSeguro(key) {
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.localStorage) {
+      return globalThis.localStorage.getItem(key);
+    }
+  } catch (_e) {}
+  return null;
+}
+
+function escribirLocalStorageSeguro(key, val) {
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.localStorage) {
+      if (val === null) {
+        globalThis.localStorage.removeItem(key);
+      } else {
+        globalThis.localStorage.setItem(key, val);
+      }
+    }
+  } catch (_e) {}
+}
+
+/**
+ * Guarda permanentemente que el Onboarding de 5 pantallas ya fue visualizado.
+ * Este indicador es independiente de la sesión y NUNCA se borra al cerrar sesión.
+ */
+export async function marcarOnboardingComoVistoPermanentemente() {
+  sessionStore.onboardingCompleted = true;
+  escribirLocalStorageSeguro(STORAGE_KEY_ONBOARDING, 'true');
+
+  const devKey = obtenerDeviceSignature();
+  try {
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/dispositivos_instalacion?on_conflict=device_key`,
+      {
+        method: 'POST',
+        headers: {
+          ...SUPABASE_HEADERS,
+          Prefer: 'resolution=merge-duplicates,return=representation',
+        },
+        body: JSON.stringify({
+          device_key: devKey,
+          onboarding_visto: true,
+          updated_at: new Date().toISOString(),
+        }),
+      }
+    );
+  } catch (_e) {}
+}
+
+/**
+ * Guarda la sesión autenticada (ID de usuario y token de sesión, NUNCA la contraseña).
+ */
+export async function guardarSesionPersistente({ usuarioId, token }) {
+  if (!usuarioId) return;
+  const payload = JSON.stringify({
+    usuario_id: usuarioId,
+    token: token || `sb-sess-${usuarioId}`,
+    timestamp: Date.now(),
+  });
+  escribirLocalStorageSeguro(STORAGE_KEY_SESSION, payload);
+
+  const devKey = obtenerDeviceSignature();
+  try {
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/dispositivos_instalacion?on_conflict=device_key`,
+      {
+        method: 'POST',
+        headers: {
+          ...SUPABASE_HEADERS,
+          Prefer: 'resolution=merge-duplicates,return=representation',
+        },
+        body: JSON.stringify({
+          device_key: devKey,
+          onboarding_visto: true,
+          usuario_sesion_id: usuarioId,
+          token_sesion: token || `sb-sess-${usuarioId}`,
+          updated_at: new Date().toISOString(),
+        }),
+      }
+    );
+  } catch (_e) {}
+}
+
+/**
+ * Limpia todos los datos en memoria del usuario anterior para evitar mezcla de datos
+ * cuando se cierra sesión o se ingresa con otra cuenta/rol.
+ */
+export function limpiarDatosUsuarioEnMemoria() {
   sessionStore.isAuthenticated = false;
   sessionStore.activeRoleSession = null;
   sessionStore.token = null;
+  sessionStore.clientFavorites = [];
+  sessionStore.clientUser = {
+    id: null,
+    nombre_completo: '',
+    correo: '',
+    telefono: '',
+    barrio: '',
+    direccion_principal: '',
+    foto_perfil_url: null,
+    latitud: null,
+    longitud: null,
+    gps_exacto_activo: false,
+  };
+  sessionStore.proUser = {
+    id: null,
+    usuario_id: null,
+    codigo_profesional: '',
+    nombre_completo: '',
+    nombre_artistico: '',
+    nombre_establecimiento: '',
+    tiene_establecimiento: false,
+    horario_atencion: {
+      dias: 'Lunes a Sábado',
+      apertura: '08:00 a.m.',
+      cierre: '07:00 p.m.',
+      bloques_disponibles: [...BLOQUES_HORARIOS_ESTANDAR],
+    },
+    lema_profesional: '',
+    biografia: '',
+    correo: '',
+    telefono: '',
+    foto_perfil_url: null,
+    anios_experiencia: '1a3',
+    especialidades: [],
+    modalidad: 'ambos',
+    barrio: '',
+    radio_cobertura_km: 12,
+    tarifa_domicilio_cop: 8000,
+    direccion_base: '',
+    latitud_actual: null,
+    longitud_actual: null,
+    dni_numero: '',
+    entidad_certificadora: '',
+    estado_verificacion: 'pendiente',
+    permisos_otorgados: false,
+    permiso_ubicacion: false,
+    permiso_notificaciones: false,
+    disponible: true,
+    activo_por_saldo: false,
+    calificacion_promedio: 5.0,
+    total_resenas: 0,
+  };
+  sessionStore.wallet = {
+    saldo_disponible_cop: 0,
+    total_recargado_cop: 0,
+    total_comisiones_pagadas_cop: 0,
+    recarga_minima_cop: 10000,
+    transacciones: [],
+  };
+  sessionStore.bookings = [];
+  sessionStore.citasAgendadas = [];
+  sessionStore.notificacionesProfesional = [];
+  sessionStore.notificacionesCliente = [];
+  sessionStore.historialCompletadas = [];
+}
+
+/**
+ * Verifica al iniciar la aplicación:
+ * 1. Si el Onboarding ya fue visualizado.
+ * 2. Si existe una sesión activa válida en el dispositivo, recuperando el usuario
+ *    y su rol real ('cliente' o 'profesional') desde la base de datos en Supabase.
+ */
+export async function verificarEstadoInicialYSesion() {
+  let onboardingVisto = leerLocalStorageSeguro(STORAGE_KEY_ONBOARDING) === 'true';
+  let sesionLocalRaw = leerLocalStorageSeguro(STORAGE_KEY_SESSION);
+  let usuarioIdPersistido = null;
+  let tokenPersistido = null;
+
+  if (sesionLocalRaw) {
+    try {
+      const parsed = JSON.parse(sesionLocalRaw);
+      usuarioIdPersistido = parsed?.usuario_id || null;
+      tokenPersistido = parsed?.token || null;
+    } catch (_e) {}
+  }
+
+  const devKey = obtenerDeviceSignature();
+  try {
+    const resDisp = await fetch(
+      `${SUPABASE_URL}/rest/v1/dispositivos_instalacion?device_key=eq.${encodeURIComponent(
+        devKey
+      )}&select=*`,
+      { method: 'GET', headers: SUPABASE_HEADERS }
+    );
+    if (resDisp.ok) {
+      const rowsDisp = await resDisp.json();
+      if (Array.isArray(rowsDisp) && rowsDisp.length > 0) {
+        const d = rowsDisp[0];
+        if (d.onboarding_visto) {
+          onboardingVisto = true;
+          escribirLocalStorageSeguro(STORAGE_KEY_ONBOARDING, 'true');
+        }
+        if (!usuarioIdPersistido && d.usuario_sesion_id) {
+          usuarioIdPersistido = d.usuario_sesion_id;
+          tokenPersistido = d.token_sesion;
+        }
+      }
+    }
+  } catch (_e) {}
+
+  sessionStore.onboardingCompleted = onboardingVisto;
+
+  // Si aún no ha visto el onboarding, debe ir a 'Welcome' (Onboarding de 5 pantallas)
+  if (!onboardingVisto) {
+    return {
+      mostrarOnboarding: true,
+      sesionValida: false,
+      rutaDestino: 'Welcome',
+    };
+  }
+
+  // Si ya vio el onboarding, verificar si hay una sesión activa válida en la base de datos
+  if (usuarioIdPersistido) {
+    try {
+      const resUser = await fetch(
+        `${SUPABASE_URL}/rest/v1/usuarios?id=eq.${usuarioIdPersistido}&select=*`,
+        { method: 'GET', headers: SUPABASE_HEADERS }
+      );
+      if (resUser.ok) {
+        const rowsUser = await resUser.json();
+        if (Array.isArray(rowsUser) && rowsUser.length > 0 && rowsUser[0].activo !== false) {
+          const u = rowsUser[0];
+          limpiarDatosUsuarioEnMemoria();
+          sessionStore.isAuthenticated = true;
+          sessionStore.activeRoleSession = u.rol;
+          sessionStore.selectedRole = u.rol;
+          sessionStore.token = tokenPersistido || `sb-sess-${u.id}`;
+
+          if (u.rol === 'profesional') {
+            let perfilPro = null;
+            const resPro = await fetch(
+              `${SUPABASE_URL}/rest/v1/perfiles_profesionales?usuario_id=eq.${u.id}&select=*`,
+              { method: 'GET', headers: SUPABASE_HEADERS }
+            );
+            if (resPro.ok) {
+              const proRows = await resPro.json();
+              if (Array.isArray(proRows) && proRows.length > 0) {
+                perfilPro = proRows[0];
+              }
+            }
+            sessionStore.proUser = {
+              ...sessionStore.proUser,
+              ...(perfilPro || {}),
+              id: perfilPro?.id || u.id,
+              usuario_id: u.id,
+              nombre_completo: u.nombre,
+              nombre_artistico: perfilPro?.nombre_artistico || u.nombre,
+              correo: u.email,
+              telefono: u.telefono || '',
+              barrio: u.barrio || perfilPro?.barrio || '',
+              direccion_base: u.direccion_principal || perfilPro?.direccion || '',
+              foto_perfil_url: u.avatar_url || null,
+              latitud_actual: u.latitud,
+              longitud_actual: u.longitud,
+            };
+            sessionStore.wallet.saldo_disponible_cop = Number(
+              perfilPro?.saldo_billetera_cop || 0
+            );
+            return {
+              mostrarOnboarding: false,
+              sesionValida: true,
+              rol: 'profesional',
+              rutaDestino: 'ProDashboard',
+            };
+          } else {
+            sessionStore.clientUser = {
+              ...sessionStore.clientUser,
+              id: u.id,
+              nombre_completo: u.nombre,
+              correo: u.email,
+              telefono: u.telefono || '',
+              barrio: u.barrio || '',
+              direccion_principal: u.direccion_principal || '',
+              foto_perfil_url: u.avatar_url || null,
+              latitud: u.latitud,
+              longitud: u.longitud,
+            };
+            return {
+              mostrarOnboarding: false,
+              sesionValida: true,
+              rol: 'cliente',
+              rutaDestino: 'Home',
+            };
+          }
+        }
+      }
+    } catch (_e) {}
+  }
+
+  // No hay sesión válida, pero el onboarding ya fue visto -> ir a Login / RoleSelection
+  return {
+    mostrarOnboarding: false,
+    sesionValida: false,
+    rutaDestino: 'Login',
+  };
+}
+
+/**
+ * Valida que un par de coordenadas (latitud, longitud) sea válido y corrige si están invertidas.
+ */
+export function normalizarYValidarCoordenadas(latRaw, lngRaw) {
+  let lat = Number(latRaw);
+  let lng = Number(lngRaw);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { valida: false, latitud: null, longitud: null };
+  }
+  if (lat === 0 && lng === 0) {
+    return { valida: false, latitud: null, longitud: null };
+  }
+  // Detectar si latitud y longitud fueron intercambiadas accidentalmente (ej. en Colombia lat ~ 3 a 11, lng ~ -73 a -77)
+  if (Math.abs(lat) > 65 && Math.abs(lng) <= 65) {
+    const temp = lat;
+    lat = lng;
+    lng = temp;
+  }
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return { valida: false, latitud: null, longitud: null };
+  }
+  return {
+    valida: true,
+    latitud: Number(lat.toFixed(6)),
+    longitud: Number(lng.toFixed(6)),
+  };
+}
+
+/**
+ * Calcula la distancia en metros exactos en línea recta (fórmula de Haversine).
+ */
+export function calcularDistanciaMetros(lat1, lon1, lat2, lon2) {
+  const c1 = normalizarYValidarCoordenadas(lat1, lon1);
+  const c2 = normalizarYValidarCoordenadas(lat2, lon2);
+  if (!c1.valida || !c2.valida) return null;
+
+  const R = 6371000; // Radio de la Tierra en metros
+  const dLat = ((c2.latitud - c1.latitud) * Math.PI) / 180;
+  const dLon = ((c2.longitud - c1.longitud) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((c1.latitud * Math.PI) / 180) *
+      Math.cos((c2.latitud * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
+
+/**
+ * Sistema completo de cálculo de distancia, ruta real por carretera y tiempo estimado (ETA)
+ * que contempla obligatoriamente los 4 casos:
+ * - CASO 1: Misma ubicación (considerando precisión GPS) -> 0 m, 0 min, mensaje «El profesional se encuentra en tu ubicación» / «Ya estás en el lugar».
+ * - CASO 2: Muy cerca (pocos metros) -> distancia real en metros y tiempo coherente en minutos/segundos sin asignar 5 min arbitrarios.
+ * - CASO 3: Ubicaciones diferentes con ruta disponible -> distancia por carretera y tiempo real de la ruta.
+ * - CASO 4: Sin ruta por carretera disponible -> distancia en línea recta aproximada y «Tiempo estimado no disponible».
+ */
+export async function calcularRutaYDistanciaReal({
+  latProfesional,
+  lngProfesional,
+  latCliente,
+  lngCliente,
+  precisionGpsMetros = 20,
+}) {
+  const coordPro = normalizarYValidarCoordenadas(latProfesional, lngProfesional);
+  const coordCli = normalizarYValidarCoordenadas(latCliente, lngCliente);
+
+  if (!coordPro.valida || !coordCli.valida) {
+    return {
+      caso: 'sin_coordenadas',
+      coordenadas_validas: false,
+      misma_ubicacion: false,
+      ruta_disponible: false,
+      eta_disponible: false,
+      distancia_metros: null,
+      distancia_km: null,
+      eta_minutos: null,
+      distancia_texto: 'Ubicación GPS pendiente de actualización',
+      tiempo_texto: 'Tiempo estimado no disponible',
+      mensaje_cliente: 'Esperando actualización de ubicación GPS del profesional',
+      mensaje_profesional: 'Activa tu GPS para calcular la distancia hacia el cliente',
+      geometria_ruta: [],
+    };
+  }
+
+  const metrosLineales = calcularDistanciaMetros(
+    coordPro.latitud,
+    coordPro.longitud,
+    coordCli.latitud,
+    coordCli.longitud
+  );
+
+  // Umbral coherente con la precisión del GPS (entre 15 m y 35 m)
+  const umbralProximidadMetros = Math.min(35, Math.max(15, Number(precisionGpsMetros) || 20));
+
+  // CASO 1: Cliente y profesional en la misma ubicación o dentro de la variación normal del GPS
+  if (metrosLineales !== null && metrosLineales <= umbralProximidadMetros) {
+    return {
+      caso: 'misma_ubicacion',
+      coordenadas_validas: true,
+      misma_ubicacion: true,
+      ruta_disponible: true,
+      eta_disponible: true,
+      distancia_metros: metrosLineales,
+      distancia_km: 0,
+      eta_minutos: 0,
+      distancia_texto: metrosLineales <= 5 ? '0 m (En el punto)' : `${metrosLineales} m`,
+      tiempo_texto: 'En ubicación',
+      mensaje_cliente: 'El profesional se encuentra en tu ubicación',
+      mensaje_profesional: 'Ya estás en el lugar',
+      geometria_ruta: [
+        [coordPro.latitud, coordPro.longitud],
+        [coordCli.latitud, coordCli.longitud],
+      ],
+    };
+  }
+
+  // Consultar servicio de rutas por carretera (OSRM Driving Route / Google Directions)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const urlRuta = `https://router.project-osrm.org/route/v1/driving/${coordPro.longitud},${coordPro.latitud};${coordCli.longitud},${coordCli.latitud}?overview=full&geometries=geojson`;
+    const res = await fetch(urlRuta, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.routes && data.routes.length > 0) {
+        const route = data.routes[0];
+        const distRutaMetros = Math.round(Number(route.distance) || metrosLineales);
+        const duracionSegundos = Math.round(Number(route.duration) || 0);
+        const puntos =
+          route.geometry && Array.isArray(route.geometry.coordinates)
+            ? route.geometry.coordinates.map((c) => [c[1], c[0]])
+            : [];
+
+        // Si la distancia vial reportada también es prácticamente el mismo punto
+        if (distRutaMetros <= umbralProximidadMetros) {
+          return {
+            caso: 'misma_ubicacion',
+            coordenadas_validas: true,
+            misma_ubicacion: true,
+            ruta_disponible: true,
+            eta_disponible: true,
+            distancia_metros: distRutaMetros,
+            distancia_km: 0,
+            eta_minutos: 0,
+            distancia_texto: `${distRutaMetros} m`,
+            tiempo_texto: 'En ubicación',
+            mensaje_cliente: 'El profesional se encuentra en tu ubicación',
+            mensaje_profesional: 'Ya estás en el lugar',
+            geometria_ruta: puntos,
+          };
+        }
+
+        // CASO 2: Muy cerca (a pocos metros, menos de 300 m)
+        if (distRutaMetros < 300) {
+          const minReales = Math.max(1, Math.round(duracionSegundos / 60));
+          const tiempoTxt =
+            duracionSegundos < 60
+              ? 'Menos de 1 min'
+              : `${minReales} min`;
+          return {
+            caso: 'muy_cerca',
+            coordenadas_validas: true,
+            misma_ubicacion: false,
+            ruta_disponible: true,
+            eta_disponible: true,
+            distancia_metros: distRutaMetros,
+            distancia_km: Number((distRutaMetros / 1000).toFixed(2)),
+            eta_minutos: duracionSegundos < 60 ? 1 : minReales,
+            distancia_texto: `${distRutaMetros} m por ruta`,
+            tiempo_texto: tiempoTxt,
+            mensaje_cliente: `El profesional está muy cerca (${distRutaMetros} m • ${tiempoTxt})`,
+            mensaje_profesional: `Estás a ${distRutaMetros} m del cliente (${tiempoTxt})`,
+            geometria_ruta: puntos,
+          };
+        }
+
+        // CASO 3: Ubicaciones diferentes con ruta vial real disponible
+        const distKm = Number((distRutaMetros / 1000).toFixed(2));
+        const minRuta = Math.max(1, Math.round(duracionSegundos / 60));
+        return {
+          caso: 'ruta_carretera',
+          coordenadas_validas: true,
+          misma_ubicacion: false,
+          ruta_disponible: true,
+          eta_disponible: true,
+          distancia_metros: distRutaMetros,
+          distancia_km: distKm,
+          eta_minutos: minRuta,
+          distancia_texto: `${distKm} km por carretera`,
+          tiempo_texto: `${minRuta} min`,
+          mensaje_cliente: `Distancia por ruta: ${distKm} km • Tiempo estimado: ${minRuta} min`,
+          mensaje_profesional: `Ruta hacia el cliente: ${distKm} km • Tiempo estimado: ${minRuta} min`,
+          geometria_ruta: puntos,
+        };
+      }
+    }
+  } catch (_routeErr) {}
+
+  // CASO 4: No se pudo calcular ruta por carretera -> Mostrar distancia en línea recta como aproximada
+  // e informar explícitamente que el tiempo estimado no está disponible
+  const distLinealKm = Number((metrosLineales / 1000).toFixed(2));
+  const textoLineal =
+    metrosLineales < 1000
+      ? `${metrosLineales} m en línea recta (aprox.)`
+      : `${distLinealKm} km en línea recta (aprox.)`;
+
+  return {
+    caso: 'sin_ruta_carretera',
+    coordenadas_validas: true,
+    misma_ubicacion: false,
+    ruta_disponible: false,
+    eta_disponible: false,
+    distancia_metros: metrosLineales,
+    distancia_km: distLinealKm,
+    eta_minutos: null,
+    distancia_texto: textoLineal,
+    tiempo_texto: 'Tiempo estimado no disponible',
+    mensaje_cliente: `${textoLineal} • Tiempo estimado no disponible`,
+    mensaje_profesional: `${textoLineal} • Tiempo estimado no disponible`,
+    geometria_ruta: [],
+  };
+}
+
+export async function cerrarSesionActiva(navigation) {
+  limpiarDatosUsuarioEnMemoria();
+  escribirLocalStorageSeguro(STORAGE_KEY_SESSION, null);
+  // Asegurar que el indicador de onboarding permanezca en true al cerrar sesión
+  escribirLocalStorageSeguro(STORAGE_KEY_ONBOARDING, 'true');
+
+  const devKey = obtenerDeviceSignature();
+  try {
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/dispositivos_instalacion?device_key=eq.${encodeURIComponent(
+        devKey
+      )}`,
+      {
+        method: 'PATCH',
+        headers: SUPABASE_HEADERS,
+        body: JSON.stringify({
+          onboarding_visto: true,
+          usuario_sesion_id: null,
+          token_sesion: null,
+          updated_at: new Date().toISOString(),
+        }),
+      }
+    );
+  } catch (_e) {}
+
   if (navigation && navigation.reset) {
     navigation.reset({
       index: 0,
-      routes: [{ name: 'RoleSelection' }],
+      routes: [{ name: 'Login' }],
     });
   } else if (navigation && navigation.replace) {
-    navigation.replace('RoleSelection');
+    navigation.replace('Login');
   }
 }
 
@@ -1618,6 +2173,7 @@ async function directSupabaseOperation(endpoint, method, body) {
       exito: true,
       guardado_en_supabase: true,
       token: `sb-client-${fila?.id || Date.now()}`,
+      ...(fila?.id ? (guardarSesionPersistente({ usuarioId: fila.id, token: `sb-client-${fila.id}` }), {}) : {}),
       ruta_inicio: 'Home',
       usuario: {
         ...fila,
@@ -1702,6 +2258,7 @@ async function directSupabaseOperation(endpoint, method, body) {
       exito: true,
       guardado_en_supabase: true,
       token: `sb-pro-${filaUsuario?.id || Date.now()}`,
+      ...(filaUsuario?.id ? (guardarSesionPersistente({ usuarioId: filaUsuario.id, token: `sb-pro-${filaUsuario.id}` }), {}) : {}),
       ruta_inicio: 'ProDashboard',
       usuario: {
         ...filaUsuario,
@@ -1771,6 +2328,7 @@ async function directSupabaseOperation(endpoint, method, body) {
     return {
       exito: true,
       token: `sb-login-${u.id}`,
+      ...(u?.id ? (guardarSesionPersistente({ usuarioId: u.id, token: `sb-login-${u.id}` }), {}) : {}),
       ruta_inicio: u.rol === 'profesional' ? 'ProDashboard' : 'Home',
       usuario: {
         ...u,
@@ -1821,4 +2379,4 @@ export async function callBackendApi(endpoint, method = 'GET', body = null) {
     clearTimeout(timer);
     return null;
   }
-}
+} 
