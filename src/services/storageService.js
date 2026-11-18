@@ -18,8 +18,8 @@ export async function seleccionarYSubirFotografiaDispositivo({
     mediaTypes: ['images'],
     allowsEditing: true,
     aspect: [1, 1],
-    quality: 0.75,
-    base64: true,
+    quality: 0.45,
+    base64: false,
   });
 
   if (result.canceled || !result.assets?.length) {
@@ -51,21 +51,23 @@ export async function seleccionarYSubirFotografiaDispositivo({
     }
   } catch (_err) {}
 
-  if (!publicUrl) {
-    publicUrl = asset.base64 ? `data:${mimeType};base64,${asset.base64}` : asset.uri;
-  }
+  // Nunca guardar Base64 gigante en PostgreSQL (evita statement timeout en Supabase)
+  const urlParaBd = publicUrl || null;
+  const urlVista = publicUrl || asset.uri;
 
   if (onProgress) onProgress(85);
-  try {
-    await SupabaseRepository.insert('archivos_storage', {
-      usuario_id: usuarioId || sessionStore.clientUser.id || sessionStore.proUser.usuario_id || null,
-      bucket_nombre: 'archivos',
-      ruta_storage: fileName,
-      url_publica: publicUrl,
-      tipo_archivo: mimeType,
-    });
-  } catch (_dbErr) {}
+  if (urlParaBd) {
+    try {
+      await SupabaseRepository.insert('archivos_storage', {
+        usuario_id: usuarioId || sessionStore.clientUser.id || sessionStore.proUser.usuario_id || null,
+        bucket_nombre: 'archivos',
+        ruta_storage: fileName,
+        url_publica: urlParaBd,
+        tipo_archivo: mimeType,
+      });
+    } catch (_dbErr) {}
+  }
 
   if (onProgress) onProgress(100);
-  return { uriLocal: asset.uri, urlPublica: publicUrl, rutaStorage: fileName };
+  return { uriLocal: asset.uri, urlPublica: urlVista, urlParaBd, rutaStorage: fileName };
 }
